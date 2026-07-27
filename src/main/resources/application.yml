@@ -1,0 +1,32 @@
+server:
+  port: 8188
+  servlet:
+    context-path: /api
+
+spring:
+  datasource:
+    # 数据库连接URL，包含主机、端口、数据库名及常用参数
+    url: jdbc:mysql://localhost:3306/frorum?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+sa-token:
+  token-name: isegoria            # 前端 header 里的 key
+  timeout: 7200                  # token 有效期 2h
+  active-timeout: 1800           # 30min 内有操作就自动续期（滑动）
+  is-concurrent: true            # 允许多端同时在线
+  is-share: true                 # 同端共享登录态
+  token-style: uuid
+# sa-token-dao-redis 接管后，登录态自动存入 Redis（分布式共享）
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.ruwei.controller

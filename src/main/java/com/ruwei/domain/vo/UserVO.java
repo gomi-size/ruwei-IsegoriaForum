@@ -1,10 +1,16 @@
 package com.ruwei.domain.vo;
 
+import com.ruwei.domain.Enum.StatusEnum;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
 public class UserVO {
     private String userId;      // 对外展示的唯一编码
 
@@ -31,6 +37,8 @@ public class UserVO {
     private Integer fansCount;  // 粉丝数
 
     private Integer postCount;  // 发帖数
+
+    private StatusEnum status; //账号状态
 
     private LocalDateTime createdAt; // 注册时间
 
