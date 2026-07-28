@@ -3,6 +3,16 @@ server:
   servlet:
     context-path: /api
 
+# ===== 跨域配置（CORS）—— 修复 #6 =====
+# 允许跨域访问的前端源（协议+域名+端口，必须精确匹配）。
+# 严禁使用 *：allowCredentials(true) 下 * 等于任意网站都能携带用户 Cookie 调接口（CSRF 风险）。
+# 生产环境请改成真实前端域名，建议放到 application-prod.yml 覆盖本段。
+cors:
+  allowed-origins:
+    - http://localhost:3000
+    - http://localhost:5173
+    - http://127.0.0.1:3000
+
 spring:
   datasource:
     # 数据库连接URL，包含主机、端口、数据库名及常用参数
@@ -12,13 +22,33 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 sa-token:
-  token-name: isegoria            # 前端 header 里的 key
+  token-name: isegoria            # 前端 header / Cookie 统一使用的 key
   timeout: 7200                  # token 有效期 2h
   active-timeout: 1800           # 30min 内有操作就自动续期（滑动）
   is-concurrent: true            # 允许多端同时在线
   is-share: true                 # 同端共享登录态
   token-style: uuid
+  # ===== Cookie 配置 =====
+  # Sa-Token 1.39 的 sa-token.cookie 是嵌套对象(SaCookieConfig)，不是布尔开关；
+  # 开启 cookie 模式为默认行为，这里只调安全属性。token 会自动写进名为 token-name(isegoria) 的 Cookie。
+  cookie:
+    path: /
+    secure: false                # 本地 http 必须 false；生产环境改为 true（建议用 application-prod.yml 覆盖）
+    http-only: true              # 防 XSS 窃取
+    same-site: Lax               # 防 CSRF（默认即 Lax，显式写出便于维护）
 # sa-token-dao-redis 接管后，登录态自动存入 Redis（分布式共享）
+
+# MyBatis-Plus：实体字段是驼峰(followCount)，数据库列也是驼峰(followCount)；
+# 关闭默认的"驼峰转下划线"，否则会自动拼出 follow_count 等不存在的列而报 SQL 错误
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: false
+    global-config:
+      db-config:
+        logic-delete-field: isDelete   # 逻辑删除字段名
+        logic-delete-value: 1         # 已删除值
+        logic-not-delete-value: 0     # 未删除值
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html

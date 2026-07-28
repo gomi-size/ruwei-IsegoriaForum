@@ -4,7 +4,9 @@ package com.ruwei.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import com.ruwei.common.BaseResponse;
+import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
+import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.domain.empty.User;
@@ -12,13 +14,10 @@ import com.ruwei.domain.vo.LoginVO;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
-@RestController("/user")
+@RestController()
+@RequestMapping("/user")
 public class UserController {
 
     @Resource
@@ -38,26 +37,69 @@ public class UserController {
         return ResultUtils.success("注册成功");
     }
 
+    /**
+     * 用户登录
+     * @param userLogin
+     * @return
+     */
     @PostMapping("/login")
-    public BaseResponse<UserVO> userLogin(
-            @RequestBody  UserLoginDTO userLogin,
-            HttpServletResponse response) { //  注入 Response 对象
-
+    public BaseResponse<UserVO> userLogin(@RequestBody UserLoginDTO userLogin) {
         User user = userService.userLogin(userLogin);
         StpUtil.login(user.getId());
-        String token = StpUtil.getTokenValue();
-
-        // 将 Token 写入 HttpOnly Cookie（Web端自动携带，JS无法读取）
-        Cookie cookie = new Cookie("satoken", token);
-        cookie.setHttpOnly(true);       // 防 XSS 窃取
-        cookie.setSecure(true);         // 仅 HTTPS 传输（生产环境必须开启）
-        cookie.setPath("/");            // 全站有效
-        cookie.setMaxAge(7200);// 与 Sa-Token timeout 保持一致
-        // cookie.setSameSite("Lax");   // 防 CSRF（Servlet API 不直接支持，需手动拼接或用框架工具）
-        response.addCookie(cookie);
-
-        // 响应体中不再返回明文 Token，只返回用户基本信息
         UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
         return ResultUtils.success(userVO);
     }
+
+    /**
+     * 用户退出登录
+     * @return
+     */
+    @PostMapping("/out")
+    public BaseResponse<String> userOut(){
+        //先检查是否登录了
+        StpUtil.checkLogin();
+        //再退出登录
+        StpUtil.logout();
+
+        return ResultUtils.success("成功退出");
+    }
+
+    /**
+     * 用户注销
+     * @return
+     */
+    @PostMapping("/cancel")
+    public BaseResponse<String> userCancel(){
+        // 先确认已登录
+        StpUtil.checkLogin();
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        User user = userService.getById(userId);
+
+        ThrowUtils.throwIf(BeanUtil.isEmpty(user), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+
+        boolean result = userService.removeById(userId);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "用户注销失败");
+
+        // 注销成功后，最后再清掉登录态
+        StpUtil.logout();
+
+        return ResultUtils.success("用户注销成功");
+    }
+
+    /**
+     * 当前登录用户获取自己详情
+     */
+    @GetMapping("/userInfo")
+    public BaseResponse<UserVO> getUserInfo(){
+        // 先确认已登录
+        StpUtil.checkLogin();
+        //获取到当前的用户的id
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        return ResultUtils.success(BeanUtil.copyProperties(userService.getById(userId),UserVO.class));
+
+
+    }
+
 }

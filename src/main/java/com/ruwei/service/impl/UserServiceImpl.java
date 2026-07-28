@@ -63,7 +63,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         user.setPassword(encryptedPassword);
 
         //3.TODO 设置userId需要使用redis
-        user.setUserid("100000");
+        user.setUserId("100000");
 
         //4.设置nikeName
         String pathName="ISEGORIA";
@@ -106,16 +106,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                 ErrorCode.PARAMS_ERROR, "密码不能全为数字");
 
         //2.检查用户是否存在
-        String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
-
         LambdaQueryWrapper<User> lambdaQueryWrapper =new LambdaQueryWrapper<>();
         lambdaQueryWrapper.eq(User::getUsername,username);
         User user = baseMapper.selectOne(lambdaQueryWrapper);
         ThrowUtils.throwIf(user==null,ErrorCode.NOT_FOUND_ERROR,"用户不存在");
 
-        //3.校验密码
+        //3.校验密码：用 checkpw 比对明文与库中 BCrypt 哈希（哈希串内含盐，自动取盐校验，禁止再 gensalt 重哈希）
         String userPassword = user.getPassword();
-        ThrowUtils.throwIf(!encryptedPassword.equals(userPassword),ErrorCode.PARAMS_ERROR,"密码错误");
+        ThrowUtils.throwIf(!BCrypt.checkpw(password, userPassword),ErrorCode.PARAMS_ERROR,"密码错误");
 
         //4.检查账号状态
         Integer status = user.getStatus();

@@ -12,6 +12,9 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 public class UserVO {
+
+    private Long id;            //用于增删改查(只允许管理员看到)
+
     private String userId;      // 对外展示的唯一编码
 
     private String username;    // 登录名
@@ -31,6 +34,10 @@ public class UserVO {
     private Integer level;      // 等级
 
     private Integer exp;        // 经验值
+
+    private String phone;       //手机号
+
+    private String email;       //邮件
 
     private Integer followCount;// 关注数
 
