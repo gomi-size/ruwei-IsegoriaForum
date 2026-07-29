@@ -13,16 +13,17 @@ import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.domain.empty.User;
-import com.ruwei.domain.vo.LoginVO;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
-import org.springframework.expression.spel.ast.BeanReference;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@RestController()
+/**
+ * 用户的基础管理
+ */
+@RestController
 @RequestMapping("/user")
 public class UserController {
 
@@ -151,6 +152,7 @@ public class UserController {
         userService.editUserInfo(userEditDTO);
         return ResultUtils.success("更新成功");
     }
+
 
     @SaCheckLogin
     @PostMapping("/editPassword")

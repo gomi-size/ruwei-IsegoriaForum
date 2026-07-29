@@ -1,4 +1,4 @@
-package com.ruwei.config;
+package com.ruwei.component;
 
 import cn.dev33.satoken.stp.StpInterface;
 import com.ruwei.domain.empty.User;

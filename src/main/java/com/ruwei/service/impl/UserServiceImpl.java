@@ -6,6 +6,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
@@ -14,9 +15,13 @@ import com.ruwei.domain.Enum.StatusEnum;
 import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
+import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.empty.User;
 import com.ruwei.service.UserService;
 import com.ruwei.mapper.UserMapper;
+import cn.hutool.core.date.DateUtil;
+import cn.hutool.core.util.StrUtil;
+import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 
 /**
@@ -27,6 +32,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     implements UserService{
+
+    @Resource
+    private SensitiveWordFilter sensitiveWordFilter;
 
     /**
      * 用户注册
@@ -166,31 +174,46 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         }
        ThrowUtils.throwIf(getById(userId)==null,ErrorCode.NOT_FOUND_ERROR,"无当前用户");
 
-        // 生日：格式 yyyy-MM-dd（如 1990-05-20）
+        // 昵称：长度4-12个字符；不传/为空则不校验也不更新；不允许纯空白
+        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getNickname()) && !userEditDTO.getNickname().matches("^(?!\\s+$).{4,12}$"),
+                ErrorCode.PARAMS_ERROR, "昵称长度应在4-12个字符之间且不能为纯空白");
+
+        // 生日：格式 yyyy-MM-dd（如 1990-05-20）；不传则不校验
         ThrowUtils.throwIf(userEditDTO.getBirthday() != null && !userEditDTO.getBirthday().toString().matches("^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])$"),
                 ErrorCode.PARAMS_ERROR, "生日格式不正确，应为yyyy-MM-dd");
 
-        // 个性签名：长度1-200个字符，不允许纯空白
-        ThrowUtils.throwIf(userEditDTO.getBio() != null && !userEditDTO.getBio() .matches("^(?!\\s+$).{1,200}$"),
+        // 个性签名：长度1-200个字符；不传/为空则不校验
+        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getBio()) && !userEditDTO.getBio().matches("^(?!\\s+$).{1,200}$"),
                 ErrorCode.PARAMS_ERROR, "个性签名长度应在1-200个字符之间且不能为纯空白");
 
-        // 所在地：长度1-100个字符，仅允许中文、字母、数字及常见地址符号
-        ThrowUtils.throwIf(userEditDTO.getLocation()  != null && !userEditDTO.getLocation().matches("^[\\u4e00-\\u9fa5a-zA-Z0-9\\s\\-,.]{1,100}$"),
+        // 所在地：长度1-100个字符，仅允许中文、字母、数字及常见地址符号；不传/为空则不校验
+        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getLocation()) && !userEditDTO.getLocation().matches("^[\\u4e00-\\u9fa5a-zA-Z0-9\\s\\-,.]{1,100}$"),
                 ErrorCode.PARAMS_ERROR, "所在地格式不正确，仅允许中英文、数字及常见地址符号，长度1-100");
 
-        // 手机号：中国大陆11位手机号
-        ThrowUtils.throwIf(userEditDTO.getPhone()!= null && !userEditDTO.getPhone().matches("^1[3-9]\\d{9}$"),
+        // 手机号：中国大陆11位手机号；不传/为空则不校验
+        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getPhone()) && !userEditDTO.getPhone().matches("^1[3-9]\\d{9}$"),
                 ErrorCode.PARAMS_ERROR, "手机号格式不正确");
 
-        // 邮箱：通用邮箱格式校验
-        ThrowUtils.throwIf(userEditDTO.getEmail() != null && !userEditDTO.getEmail().matches("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"),
+        // 邮箱：通用邮箱格式校验；不传/为空则不校验
+        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getEmail()) && !userEditDTO.getEmail().matches("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"),
                 ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
 
+        // ===== 敏感词/违禁词检查（新增）=====
+        // 仅对“用户可自由输入的展示字段”做检查，且只在字段非空时执行：
+        // 命中任意敏感词（替换/拦截/审核）即由 checkStrict 抛 PARAMS_ERROR 拒绝本次编辑。
+        if (StrUtil.isNotBlank(userEditDTO.getNickname())) {
+            sensitiveWordFilter.checkStrict(userEditDTO.getNickname(), "昵称");
+        }
+        if (StrUtil.isNotBlank(userEditDTO.getBio())) {
+            sensitiveWordFilter.checkStrict(userEditDTO.getBio(), "个性签名");
+        }
+        if (StrUtil.isNotBlank(userEditDTO.getLocation())) {
+            sensitiveWordFilter.checkStrict(userEditDTO.getLocation(), "所在地");
+        }
 
-
-        User userEdit = BeanUtil.copyProperties(userEditDTO, User.class);
-        boolean result = updateById(userEdit);
-        ThrowUtils.throwIf(!result,ErrorCode.OPERATION_ERROR,"更新信息失败");
+        User user = BeanUtil.copyProperties(userEditDTO, User.class);
+        boolean result = updateById(user);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新信息失败");
     }
 
     /**

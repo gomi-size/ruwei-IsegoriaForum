@@ -21,7 +21,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public BaseResponse<?> handleBusinessException(BusinessException e) {
         // 返回异常自带的 code 与 message，契约与 ResultUtils 一致
-        log.error("出现错误{}：", e.getMessage());
+        log.error("出现错误{}", e.getMessage());
         return ResultUtils.error(e.getCode(), e.getMessage());
     }
 
@@ -31,7 +31,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(NotLoginException.class)
     public BaseResponse<?> handleNotLoginException(NotLoginException e) {
-        log.error("未登录拦截（{}）：", e.getMessage());
+        log.error("未登录拦截（{}）", e.getMessage());
         return ResultUtils.error(ErrorCode.NOT_LOGIN_ERROR);
     }
 

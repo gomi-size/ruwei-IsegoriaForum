@@ -42,13 +42,20 @@ sa-token:
 # 关闭默认的"驼峰转下划线"，否则会自动拼出 follow_count 等不存在的列而报 SQL 错误
 mybatis-plus:
   configuration:
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 改用 slf4j 日志实现，才能按 mapper 粒度控制 SQL 是否打印（StdOutImpl 会绕过日志级别，无法单独静音某条查询）
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
     map-underscore-to-camel-case: false
     global-config:
       db-config:
         logic-delete-field: isDelete   # 逻辑删除字段名
         logic-delete-value: 1         # 已删除值
         logic-not-delete-value: 0     # 未删除值
+
+# 日志级别：其余 mapper 仍打印 SQL（debug）；仅压住敏感词加载这一条查询的 SQL 日志
+logging:
+  level:
+    com.ruwei.mapper: debug
+    com.ruwei.mapper.SensitiveWordMapper: warn
 
 springdoc:
   swagger-ui:
