@@ -1,6 +1,8 @@
 package com.ruwei.common;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
+import cn.dev33.satoken.exception.NotRoleException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -24,13 +26,32 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Sa-Token 未登录异常：后续接入 @SaCheckLogin 等鉴权注解时统一返回未登录
+     * Sa-Token 未登录异常：@SaCheckLogin 等鉴权注解触发
      * 注意：未登录/登录态失效是正常业务状态，不是系统故障，禁止用 ERROR 记录（否则日志刷屏 + 误报警）
      */
     @ExceptionHandler(NotLoginException.class)
     public BaseResponse<?> handleNotLoginException(NotLoginException e) {
-        log.debug("未登录拦截（{}）：", e.getMessage());
+        log.error("未登录拦截（{}）：", e.getMessage());
         return ResultUtils.error(ErrorCode.NOT_LOGIN_ERROR);
+    }
+
+    /**
+     * Sa-Token 角色不足：@SaCheckRole("admin") 校验失败（非管理员访问管理员接口）
+     * 正常业务拒绝，非系统故障，debug 级别即可
+     */
+    @ExceptionHandler(NotRoleException.class)
+    public BaseResponse<?> handleNotRoleException(NotRoleException e) {
+        log.error("角色不足（需要管理员）：{}", e.getMessage());
+        return ResultUtils.error(ErrorCode.NO_AUTH_ERROR,"只要管理员才能访问");
+    }
+
+    /**
+     * Sa-Token 权限不足：@SaCheckPermission 校验失败
+     */
+    @ExceptionHandler(NotPermissionException.class)
+    public BaseResponse<?> handleNotPermissionException(NotPermissionException e) {
+        log.error("权限不足：{}", e.getMessage());
+        return ResultUtils.error(ErrorCode.NO_AUTH_ERROR,"只要管理员才能访问");
     }
 
     /**
@@ -39,6 +60,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public BaseResponse<?> handleException(Exception e) {
         log.error("系统未处理异常，请联系管理员：", e);
-        return ResultUtils.error(ErrorCode.SYSTEM_ERROR);
+        return ResultUtils.error(ErrorCode.SYSTEM_ERROR,"系统错误请联系管理员");
     }
 }

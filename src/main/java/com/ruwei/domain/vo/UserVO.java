@@ -47,6 +47,8 @@ public class UserVO {
 
     private StatusEnum status; //账号状态
 
+    private Integer admin;      // 是否管理员：1-是，0-否
+
     private LocalDateTime createdAt; // 注册时间
 
 }

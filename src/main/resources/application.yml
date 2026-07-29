@@ -42,6 +42,7 @@ sa-token:
 # 关闭默认的"驼峰转下划线"，否则会自动拼出 follow_count 等不存在的列而报 SQL 错误
 mybatis-plus:
   configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
     map-underscore-to-camel-case: false
     global-config:
       db-config:

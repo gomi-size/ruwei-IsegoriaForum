@@ -7,6 +7,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.List;
 
+/**
+ * 跨域
+ */
 @Configuration
 @ConfigurationProperties(prefix = "cors")
 public class CorsConfig implements WebMvcConfigurer {

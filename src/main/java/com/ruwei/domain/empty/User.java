@@ -120,4 +120,9 @@ public class User {
      */
     @TableLogic
     private Integer isDelete;
+
+    /**
+     * 是否管理员：1-是，0-否
+     */
+    private Integer admin;
 }

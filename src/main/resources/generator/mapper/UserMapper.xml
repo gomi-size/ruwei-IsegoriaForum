@@ -26,12 +26,13 @@
             <result property="createdat" column="createdAt" />
             <result property="updatedat" column="updatedAt" />
             <result property="isdelete" column="isDelete" />
+            <result property="admin" column="admin" />
     </resultMap>
 
     <sql id="Base_Column_List">
         id,userId,username,nickname,password,avatar,
         gender,birthday,bio,location,level,
         exp,phone,email,status,followCount,
-        fansCount,postCount,createdAt,updatedAt,isDelete
+        fansCount,postCount,createdAt,updatedAt,isDelete,admin
     </sql>
 </mapper>
