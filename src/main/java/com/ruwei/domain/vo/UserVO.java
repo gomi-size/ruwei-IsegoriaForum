@@ -15,7 +15,7 @@ public class UserVO {
 
     private Long id;            //用于增删改查(只允许管理员看到)
 
-    private String userId;      // 对外展示的唯一编码
+    private Long userId;      // 对外展示的唯一编码
 
     private String username;    // 登录名
 
@@ -48,6 +48,12 @@ public class UserVO {
     private StatusEnum status; //账号状态
 
     private Integer admin;      // 是否管理员：1-是，0-否
+
+    private Boolean isFollowed;   // 当前登录用户是否关注了他
+
+    private Boolean isMutual;   // 是否互相关注
+
+    private Boolean isFans;     // 是否是粉丝
 
     private LocalDateTime createdAt; // 注册时间
 

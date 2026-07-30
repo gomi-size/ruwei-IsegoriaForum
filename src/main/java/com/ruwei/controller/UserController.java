@@ -99,9 +99,19 @@ public class UserController {
     @GetMapping("/userInfo")
     public BaseResponse<UserVO> getUserVOInfo(){
         // @SaCheckLogin 已保证登录态
-        Long userId = StpUtil.getLoginIdAsLong();
+        Long id = StpUtil.getLoginIdAsLong();
 
-        return ResultUtils.success(BeanUtil.copyProperties(userService.getById(userId),UserVO.class));
+        return ResultUtils.success(BeanUtil.copyProperties(userService.getById(id),UserVO.class));
+    }
+
+    /**
+     * 当前登录用户获取别人的详情详情（需登录）
+     */
+    @SaCheckLogin
+    @GetMapping("/otherUserInfo")
+    public BaseResponse<UserVO> getOtherUserVOInfo(Long userId){
+        UserVO userVO =userService.getOtherUserVOInfo(userId);
+        return ResultUtils.success(userVO);
     }
 
     /**
@@ -154,6 +164,12 @@ public class UserController {
     }
 
 
+    /**
+     * 修改密码
+     * @param id
+     * @param password
+     * @return
+     */
     @SaCheckLogin
     @PostMapping("/editPassword")
     public BaseResponse<String> editUserPassword(Long id,String password){
@@ -161,4 +177,15 @@ public class UserController {
         return ResultUtils.success("修改密码成功");
     }
 
+    /**
+     * 忘记密码
+     * @param userId
+     * @param Password
+     * @return
+     */
+    @PostMapping("/forgetPassword")
+    public BaseResponse<Boolean> forgetPassword(Long userId,String Password){
+        userService.forgetPassword(userId,Password);
+        return ResultUtils.success(true);
+    }
 }

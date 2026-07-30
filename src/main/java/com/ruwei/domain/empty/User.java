@@ -23,7 +23,7 @@ public class User {
     /**
      * 对外展示的唯一编码
      */
-    private String userId;
+    private Long userId;
 
     /**
      * 登录名(手机或邮箱)

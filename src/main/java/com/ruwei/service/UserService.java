@@ -5,6 +5,7 @@ import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.domain.empty.User;
+import com.ruwei.domain.vo.UserVO;
 
 
 /**
@@ -55,4 +56,16 @@ public interface UserService extends IService<User> {
      * @param password
      */
     void editUserPassword(Long id, String password);
+
+    /**
+     * 忘记密码
+     * @param userId
+     */
+    void forgetPassword(Long userId,String Password);
+
+    /**
+     * 当前登录用户获取别人的详情详情（需登录）
+     * @param userId 对方的userId
+     */
+    UserVO getOtherUserVOInfo(Long userId);
 }

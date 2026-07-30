@@ -4,9 +4,9 @@ package com.ruwei.service.impl;
 import cn.dev33.satoken.secure.BCrypt;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
@@ -17,9 +17,11 @@ import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.empty.User;
+import com.ruwei.domain.empty.UserFollow;
+import com.ruwei.domain.vo.UserVO;
+import com.ruwei.mapper.UserFollowMapper;
 import com.ruwei.service.UserService;
 import com.ruwei.mapper.UserMapper;
-import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private SensitiveWordFilter sensitiveWordFilter;
+
+    @Resource
+    private UserFollowMapper userFollowMapper;
 
     /**
      * 用户注册
@@ -74,7 +79,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         user.setPassword(encryptedPassword);
 
         //3.TODO 设置userId需要使用redis
-        user.setUserId("100001");
+        user.setUserId(100001L);
 
         //4.设置nikeName
         String pathName="ISEGORIA";
@@ -242,8 +247,64 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         boolean result = updateById(user);
         ThrowUtils.throwIf(!result,ErrorCode.OPERATION_ERROR,"修改密码未成功");
     }
+
+    /**
+     * 忘记密码
+     * @param userId
+     * @param password
+     */
+    @Override
+    public void forgetPassword(Long userId,String password) {
+        ThrowUtils.throwIf(userId==null|| ObjectUtil.isEmpty(userId),ErrorCode.PARAMS_ERROR,"用户名不能为空");
+
+        boolean exists = lambdaQuery().eq(User::getUserId, userId).exists();
+        ThrowUtils.throwIf(!exists,ErrorCode.NOT_FOUND_ERROR,"用户不存在");
+
+        // 密码：8~12位，不能全为数字
+        ThrowUtils.throwIf(password.length() < 8 || password.length() > 12,
+                ErrorCode.PARAMS_ERROR, "密码长度必须为8~12位");
+        ThrowUtils.throwIf(password.matches("^\\d+$"),
+                ErrorCode.PARAMS_ERROR, "密码不能全为数字");
+
+        boolean update = lambdaUpdate().eq(User::getUserId, userId)
+                .eq(User::getPassword, password)
+                .set(User::getPassword, password)
+                .update();
+        ThrowUtils.throwIf(!update,ErrorCode.OPERATION_ERROR,"修改密码失败");
+    }
+
+    /**
+     * 当前登录用户获取别人的详情详情（需登录）
+     * @param userId 对方的userId
+     */
+    @Override
+    public UserVO getOtherUserVOInfo(Long userId) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        User user = getById(loginId);
+        User otherUser = lambdaQuery().eq(User::getUserId, userId).one();
+        UserVO userVO = BeanUtil.copyProperties(otherUser, UserVO.class);
+        userVO.setPhone("***");
+        userVO.setEmail("***");
+
+        //查看是否关注了他
+        LambdaQueryWrapper<UserFollow> iFollowHimWrapper  =new LambdaQueryWrapper<>();
+        iFollowHimWrapper .eq(UserFollow::getFollowerId,user.getUserId())
+                .eq(UserFollow::getFolloweeId,otherUser.getUserId())
+                .eq(UserFollow::getStatus,1);
+        boolean isFollowed = userFollowMapper.exists(iFollowHimWrapper);
+        userVO.setIsFollowed(isFollowed);
+
+        //查看是否是粉丝
+        LambdaQueryWrapper<UserFollow> heFollowMeWrapper = new LambdaQueryWrapper<>();
+        heFollowMeWrapper.eq(UserFollow::getFollowerId, otherUser.getUserId())
+                .eq(UserFollow::getFolloweeId, user.getUserId())
+                .eq(UserFollow::getStatus, 1);
+        boolean isFans=userFollowMapper.exists(heFollowMeWrapper);
+        userVO.setIsFans(isFans);
+
+        //查看是否为互相关注
+        userVO.setIsMutual(isFollowed&isFans);
+
+        return userVO;
+    }
 }
-
-
-
-
