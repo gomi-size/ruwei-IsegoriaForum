@@ -275,35 +275,58 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     /**
      * 当前登录用户获取别人的详情详情（需登录）
-     * @param userId 对方的userId
+     * <p>入参为对外编码 userId，便于前端在他人主页直接调用；内部关注关系统一按内部 id 计算。</p>
+     * @param userId 对方的对外编码
      */
     @Override
     public UserVO getOtherUserVOInfo(Long userId) {
-        long loginId = StpUtil.getLoginIdAsLong();
-        User user = getById(loginId);
         User otherUser = lambdaQuery().eq(User::getUserId, userId).one();
+        return buildOtherUserVO(otherUser);
+    }
+
+    /**
+     * 按内部主键 id 获取他人详情（关注/粉丝列表内部使用）。
+     * @param id 对方内部主键
+     */
+    @Override
+    public UserVO getOtherUserVOInfoById(Long id) {
+        User otherUser = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(otherUser), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        return buildOtherUserVO(otherUser);
+    }
+
+    /**
+     * 组装他人 VO 并计算当前登录用户与对方的关系标志（关注/粉丝/互关）。
+     * 关注关系的 followerId / followeeId 在 user_follow 表中均为内部 id，故此处统一用内部 id 比对。
+     * @param otherUser 目标用户实体
+     * @return 他人视图 VO
+     */
+    private UserVO buildOtherUserVO(User otherUser) {
+        long loginId = StpUtil.getLoginIdAsLong();
         UserVO userVO = BeanUtil.copyProperties(otherUser, UserVO.class);
         userVO.setPhone("***");
         userVO.setEmail("***");
 
-        //查看是否关注了他
-        LambdaQueryWrapper<UserFollow> iFollowHimWrapper  =new LambdaQueryWrapper<>();
-        iFollowHimWrapper .eq(UserFollow::getFollowerId,user.getUserId())
-                .eq(UserFollow::getFolloweeId,otherUser.getUserId())
-                .eq(UserFollow::getStatus,1);
+        long otherId = otherUser.getId();
+
+        // 我是否关注了他
+        LambdaQueryWrapper<UserFollow> iFollowHimWrapper = new LambdaQueryWrapper<>();
+        iFollowHimWrapper.eq(UserFollow::getFollowerId, loginId)
+                .eq(UserFollow::getFolloweeId, otherId)
+                .eq(UserFollow::getStatus, 1);
         boolean isFollowed = userFollowMapper.exists(iFollowHimWrapper);
         userVO.setIsFollowed(isFollowed);
 
-        //查看是否是粉丝
+        // 他是否是我的粉丝（即他关注了我）
         LambdaQueryWrapper<UserFollow> heFollowMeWrapper = new LambdaQueryWrapper<>();
-        heFollowMeWrapper.eq(UserFollow::getFollowerId, otherUser.getUserId())
-                .eq(UserFollow::getFolloweeId, user.getUserId())
+        heFollowMeWrapper.eq(UserFollow::getFollowerId, otherId)
+                .eq(UserFollow::getFolloweeId, loginId)
                 .eq(UserFollow::getStatus, 1);
-        boolean isFans=userFollowMapper.exists(heFollowMeWrapper);
+        boolean isFans = userFollowMapper.exists(heFollowMeWrapper);
         userVO.setIsFans(isFans);
 
-        //查看是否为互相关注
-        userVO.setIsMutual(isFollowed&isFans);
+        // 互相关注 = 我关注他 且 他关注我
+        userVO.setIsMutual(isFollowed && isFans);
 
         return userVO;
     }

@@ -25,20 +25,21 @@ public class UserFollowController {
 
     /**
      * 关注
+     * 入参可传 id（内部主键）或 userId（对外编码），二选一即可，库内统一存内部 id
      */
-
     @PostMapping("/follow")
-    public BaseResponse<String> followUser(Long userId){
-        userFollowService.followUser(userId);
+    public BaseResponse<String> followUser(Long id, Long userId){
+        userFollowService.followUser(id, userId);
         return ResultUtils.success("关注成功");
     }
 
     /**
      * 取消关注
+     * 入参可传 id（内部主键）或 userId（对外编码），二选一即可，库内统一存内部 id
      */
     @PostMapping("/cancelFollow")
-    public BaseResponse<String> cancelFollowUser(Long userId){
-        userFollowService.cancelFollowUser(userId);
+    public BaseResponse<String> cancelFollowUser(Long id, Long userId){
+        userFollowService.cancelFollowUser(id, userId);
         return ResultUtils.success("取消成功");
     }
     /**

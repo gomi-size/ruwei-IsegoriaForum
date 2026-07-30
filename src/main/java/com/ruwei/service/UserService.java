@@ -64,8 +64,15 @@ public interface UserService extends IService<User> {
     void forgetPassword(Long userId,String Password);
 
     /**
-     * 当前登录用户获取别人的详情详情（需登录）
-     * @param userId 对方的userId
+     * 当前登录用户获取别人的详情（按对外编码 userId 查找，供前端直接调用于查看他人主页）
+     * @param userId 对方的对外编码
      */
     UserVO getOtherUserVOInfo(Long userId);
+
+    /**
+     * 当前登录用户获取别人的详情（按内部主键 id 查找）。
+     * 关注列表/粉丝列表内部统一以内部 id 索引，渲染 VO 时使用本方法。
+     * @param id 对方的内部主键
+     */
+    UserVO getOtherUserVOInfoById(Long id);
 }

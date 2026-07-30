@@ -16,15 +16,19 @@ public interface UserFollowService extends IService<UserFollow> {
 
     /**
      * 关注用户
-     * @param userId 对方的userId
+     * <p>入参可传 id（内部主键）或 userId（对外编码），二选一；库内统一以内部 id 存储关系。</p>
+     * @param id     对方内部主键（优先使用）
+     * @param userId 对方对外编码（与 id 二选一）
      */
-    void followUser(Long userId);
+    void followUser(Long id, Long userId);
 
     /**
      * 取消关注
-     * @param userId 对方的userId
+     * <p>入参可传 id（内部主键）或 userId（对外编码），二选一；库内统一以内部 id 存储关系。</p>
+     * @param id     对方内部主键（优先使用）
+     * @param userId 对方对外编码（与 id 二选一）
      */
-    void cancelFollowUser(Long userId);
+    void cancelFollowUser(Long id, Long userId);
 
     /**
      * 获取关注列表
