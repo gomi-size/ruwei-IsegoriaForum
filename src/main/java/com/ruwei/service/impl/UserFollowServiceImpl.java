@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
+import com.ruwei.component.notification.event.FollowEvent;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.domain.vo.UserVO;
@@ -15,6 +16,7 @@ import com.ruwei.service.UserFollowService;
 import com.ruwei.mapper.UserFollowMapper;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,9 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
     @Resource
     @Lazy
     private  UserService userService;
+
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 将入参解析为目标用户的内部主键 id。
@@ -105,13 +110,18 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             // 我的关注数 +1
             ThrowUtils.throwIf(!incrementCount(User::getId, loginId, "followCount", 1),
                     ErrorCode.OPERATION_ERROR, "关注失败");
+
             // 对方粉丝数 +1（按内部 id 匹配，避免内外 id 混用）
             incrementCount(User::getId, targetId, "fansCount", 1);
+
 
             // 互粉：若对方也已关注我，则我的粉丝数也 +1
             if (isMutualFollow(loginId, targetId)) {
                 incrementCount(User::getId, loginId, "fansCount", 1);
             }
+            //推送消息
+            eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
+
         } else if (one.getStatus() == 2) {
             // 曾关注但已取消，恢复关注
             boolean update = lambdaUpdate().eq(UserFollow::getFollowerId, loginId)
@@ -128,6 +138,8 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             if (isMutualFollow(loginId, targetId)) {
                 incrementCount(User::getId, loginId, "fansCount", 1);
             }
+            //推送消息
+            eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
         } else {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "无法重复关注");
         }
@@ -169,10 +181,19 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             if (isMutualFollow(loginId, targetId)) {
                 incrementCount(User::getId, loginId, "fansCount", -1);
             }
+            //推送消息
+            eventPublisher.publishEvent(new FollowEvent(this,id,targetId));
         } else if (one.getStatus() == 2) {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "已经处于取消关注状态");
         }
     }
+
+
+
+
+
+
+
 
     /**
      * 判断 targetId 是否已关注 loginId（互粉检测，仅统计 status=1）。

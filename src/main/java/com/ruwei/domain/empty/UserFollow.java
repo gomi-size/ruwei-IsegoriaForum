@@ -8,9 +8,9 @@ import lombok.Data;
 
 /**
  * 关注关系表
- * @TableName user_follow
+ * @TableName userFollow
  */
-@TableName(value ="user_follow")
+@TableName(value ="userFollow")
 @Data
 public class UserFollow {
     /**

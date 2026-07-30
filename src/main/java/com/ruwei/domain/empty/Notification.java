@@ -57,7 +57,7 @@ public class Notification implements Serializable {
     private String bizKey;
 
     /**
-     * 
+     * 0未读 1已读
      */
     private Integer isRead;
 
