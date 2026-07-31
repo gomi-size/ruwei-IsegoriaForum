@@ -5,14 +5,19 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
+import com.ruwei.domain.dto.UserQueryDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.domain.empty.User;
+import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
@@ -133,10 +138,15 @@ public class UserController {
      * @return
      */
     @SaCheckRole("admin")
-    @GetMapping("/list")
-    public BaseResponse<List<User>> listAllUsers() {
-        List<User> users = userService.list();
-        return ResultUtils.success(users);
+    @PostMapping("/list")
+    public BaseResponse<IPage<User>> listAllUsers(@RequestBody  UserQueryDTO userQueryDTO) {
+        QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
+        IPage<User> userPage = userService.page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
+        userPage.convert(user -> {
+            user.setPassword("*****");
+            return user;
+        });
+        return ResultUtils.success(userPage);
     }
 
     /**

@@ -3,15 +3,15 @@ package com.ruwei.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
+import com.ruwei.domain.dto.UserFollowOrFansPageDTO;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserFollowService;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import jakarta.annotation.Resource;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * 关注关系的控制类
@@ -43,19 +43,21 @@ public class UserFollowController {
         return ResultUtils.success("取消成功");
     }
     /**
-     * 查看关注列表
+     * 查看关注列表（分页）
      */
-    @GetMapping("/getFollowUserList")
-    public BaseResponse<List<UserVO>> getFollowUserList(){
-       List<UserVO>  userVOList=userFollowService.getFollowUserList();
-       return ResultUtils.success(userVOList);
+    @PostMapping("/getFollowUserList")
+    public BaseResponse<IPage<UserVO>> getFollowUserList(@RequestBody UserFollowOrFansPageDTO userFollowOrFansPageDTO){
+
+       IPage<UserVO> page = userFollowService.getFollowUserList(userFollowOrFansPageDTO);
+       return ResultUtils.success(page);
     }
+
     /**
-     * 查看粉丝列表
+     * 查看粉丝列表（分页）
      */
-    @GetMapping("/getFansUserList")
-    public BaseResponse<List<UserVO>> getFansUserList(){
-        List<UserVO>  userVOList=userFollowService.getFansUserList();
-        return ResultUtils.success(userVOList);
+    @PostMapping("/getFansUserList")
+    public BaseResponse<IPage<UserVO>> getFansUserList(@RequestBody  UserFollowOrFansPageDTO userFollowOrFansPageDTO){
+        IPage<UserVO> page = userFollowService.getFansUserList(userFollowOrFansPageDTO);
+        return ResultUtils.success(page);
     }
 }

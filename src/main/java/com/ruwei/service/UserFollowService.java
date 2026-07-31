@@ -1,6 +1,8 @@
 package com.ruwei.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.spring.service.IService;
+import com.ruwei.domain.dto.UserFollowOrFansPageDTO;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.domain.vo.UserVO;
 
@@ -31,15 +33,15 @@ public interface UserFollowService extends IService<UserFollow> {
     void cancelFollowUser(Long id, Long userId);
 
     /**
-     * 获取关注列表
-     * @return
+     * 获取关注列表（分页，按关注时间倒序）
+     * @return 关注用户的分页结果（UserVO）
      */
-    List<UserVO> getFollowUserList();
+    IPage<UserVO> getFollowUserList(UserFollowOrFansPageDTO userFollowOrFansPageDTO);
 
 
     /**
-     * 获取粉丝列表
-     * @return
+     * 获取粉丝列表（分页，按关注时间倒序）
+     * @return 粉丝用户的分页结果（UserVO）
      */
-    List<UserVO> getFansUserList();
+    IPage<UserVO> getFansUserList(UserFollowOrFansPageDTO userFollowOrFansPageDTO);
 }

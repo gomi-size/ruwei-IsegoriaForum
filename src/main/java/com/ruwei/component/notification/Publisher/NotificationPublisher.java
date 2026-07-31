@@ -1,4 +1,4 @@
-package com.ruwei.component.notification;
+package com.ruwei.component.notification.Publisher;
 
 import com.ruwei.domain.dto.NotifyPushMessage;
 

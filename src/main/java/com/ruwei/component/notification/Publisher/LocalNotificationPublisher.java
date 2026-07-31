@@ -1,4 +1,4 @@
-package com.ruwei.component.notification;
+package com.ruwei.component.notification.Publisher;
 
 import com.ruwei.domain.dto.NotifyPushMessage;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 /**
  * 本地实现：通过 WebSocket(STOMP) 直接推送给在线用户。
  * convertAndSendToUser(内部id, "/queue/notify", msg) —— Spring 按 Principal.getName()=内部id 路由到该用户全部会话。
+ * 消费者
  */
 @Slf4j
 @Component

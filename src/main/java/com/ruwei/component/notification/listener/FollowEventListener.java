@@ -1,7 +1,7 @@
 package com.ruwei.component.notification.listener;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.ruwei.component.notification.NotificationPublisher;
+import com.ruwei.component.notification.Publisher.NotificationPublisher;
 import com.ruwei.component.notification.event.FollowEvent;
 import com.ruwei.domain.dto.NotifyPushMessage;
 import com.ruwei.domain.empty.Notification;
@@ -22,6 +22,7 @@ import java.util.Date;
 
 /**
  * 监听 FollowEvent：在关注事务提交后，生成通知落库（幂等），并实时推送给被关注者。
+ * 生产者
  */
 @Slf4j
 @Component

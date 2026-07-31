@@ -18,7 +18,7 @@ import lombok.Data;
  *
  * @TableName sensitiveWord
  */
-@TableName(value = "sensitiveWord")
+@TableName("sensitive_word")
 @Data
 public class SensitiveWord {
 
@@ -47,7 +47,7 @@ public class SensitiveWord {
 
     /**
      * 创建时间，由数据库默认值生成。
- * 列名 {@code createdAt} 与字段名一致（驼峰，关闭了驼峰转下划线映射）；
+ * 列名 {@code createdAt} 与字段名一致
  * 插入/更新策略均设为 NEVER，交由数据库默认值维护，不在代码层赋值。
  */
 @TableField(value = "createdAt", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)

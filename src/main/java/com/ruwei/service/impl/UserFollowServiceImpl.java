@@ -3,14 +3,20 @@ package com.ruwei.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.notification.event.FollowEvent;
+import com.ruwei.domain.dto.UserFollowOrFansPageDTO;
+import com.ruwei.domain.dto.UserQueryDTO;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
+import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserFollowService;
 import com.ruwei.mapper.UserFollowMapper;
@@ -24,6 +30,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
 * @author Administrator
@@ -227,46 +236,95 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
     }
 
     /**
-     * 获取我关注的用户列表。
-     * 以当前用户内部 id 检索，渲染时再经内部 id 查出对方 VO。
-     * @return 关注列表（UserVO）
+     * 获取我关注的用户列表（分页，按关注时间倒序）。
+     * <p>实现要点：
+     * <ol>
+     *   <li>先在 {@code userFollow} 表上分页，total = 关注人数，顺序按关注时间倒序；</li>
+     *   <li>用本页的对端 {@code followeeId} 去 {@code user} 表查详情（小集合，无需再分页）；</li>
+     *   <li>复用关系页的 current/size/total 组装最终 VO 页，保证「关注顺序」不被打乱。</li>
+     * </ol>
+     * 全部使用内部 id。
+     *
+     * @param dto 分页参数（current / pageSize）
+     * @return 关注用户的分页结果（UserVO）
      */
     @Override
-    public List<UserVO> getFollowUserList() {
+    public IPage<UserVO> getFollowUserList(UserFollowOrFansPageDTO dto) {
         long loginId = StpUtil.getLoginIdAsLong();
 
-        List<UserFollow> userFollowList = lambdaQuery()
-                .eq(UserFollow::getFollowerId, loginId)
-                .eq(UserFollow::getStatus, 1)
-                .list();
+        // 1) 在关注关系表上分页（按关注时间倒序），total 即关注人数
+        IPage<UserFollow> followPage = this.page(
+                new Page<>(dto.getCurrent(), dto.getPageSize()),
+                QueryWrapperUtils.getFollowingQueryWrapper(loginId));
 
-        List<UserVO> userVOList = new ArrayList<>();
-        userFollowList.forEach(userFollow -> {
-            Long followeeId = userFollow.getFolloweeId();
-            UserVO userVO = userService.getOtherUserVOInfoById(followeeId);
-            userVOList.add(userVO);
-        });
-        return userVOList;
+        // 2) 取出本页对端用户内部 id（已按 createdAt 倒序）
+        List<Long> followeeIds = followPage.getRecords().stream()
+                .map(UserFollow::getFolloweeId)
+                .toList();
+
+        // 3) 查本页用户详情（小集合，不在此处分页），并保持关注顺序
+        List<UserVO> voList;
+        if (followeeIds.isEmpty()) {
+            voList = List.of();
+        } else {
+            List<User> users = userService.list(
+                    QueryWrapperUtils.getUserInIdsQueryWrapper(new UserQueryDTO(), followeeIds));
+            Map<Long, User> userMap = users.stream()
+                    .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
+            voList = followeeIds.stream()
+                    .map(userMap::get)
+                    .filter(Objects::nonNull)
+                    .map(u -> BeanUtil.copyProperties(u, UserVO.class))
+                    .toList();
+        }
+
+        // 4) 复用关系页的分页元数据，组装最终 VO 页
+        IPage<UserVO> result = new Page<>(followPage.getCurrent(), followPage.getSize(), followPage.getTotal());
+        result.setRecords(voList);
+        return result;
     }
 
     /**
-     * 获取我的粉丝列表。
-     * @return 粉丝列表（UserVO）
+     * 获取我的粉丝列表（分页，按关注时间倒序）。
+     * <p>实现要点与 {@link #getFollowUserList} 一致：先分页 {@code userFollow} 表取本页对端 id，
+     * 再去 {@code user} 表查详情并还原关注顺序，最后复用关系页分页元数据组装 VO 页。全部使用内部 id。</p>
+     *
+     * @param dto 分页参数（current / pageSize）
+     * @return 粉丝用户的分页结果（UserVO）
      */
     @Override
-    public List<UserVO> getFansUserList() {
+    public IPage<UserVO> getFansUserList(UserFollowOrFansPageDTO dto) {
         long loginId = StpUtil.getLoginIdAsLong();
 
-        List<UserFollow> userFansList = lambdaQuery()
-                .eq(UserFollow::getFolloweeId, loginId)
-                .eq(UserFollow::getStatus, 1)
-                .list();
-        List<UserVO> userVOList = new ArrayList<>();
-        userFansList.forEach(useFans -> {
-            Long followerId = useFans.getFollowerId();
-            UserVO userVO = userService.getOtherUserVOInfoById(followerId);
-            userVOList.add(userVO);
-        });
-        return userVOList;
+        // 1) 在关注关系表上分页（按关注时间倒序），total 即粉丝人数
+        IPage<UserFollow> fansPage = this.page(
+                new Page<>(dto.getCurrent(), dto.getPageSize()),
+                QueryWrapperUtils.getFansQueryWrapper(loginId));
+
+        // 2) 取出本页对端（粉丝）用户内部 id（已按 createdAt 倒序）
+        List<Long> followerIds = fansPage.getRecords().stream()
+                .map(UserFollow::getFollowerId)
+                .toList();
+
+        // 3) 查本页用户详情（小集合，不在此处分页），并保持关注顺序
+        List<UserVO> voList;
+        if (followerIds.isEmpty()) {
+            voList = List.of();
+        } else {
+            List<User> users = userService.list(
+                    QueryWrapperUtils.getUserInIdsQueryWrapper(new UserQueryDTO(), followerIds));
+            Map<Long, User> userMap = users.stream()
+                    .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
+            voList = followerIds.stream()
+                    .map(userMap::get)
+                    .filter(Objects::nonNull)
+                    .map(u -> BeanUtil.copyProperties(u, UserVO.class))
+                    .toList();
+        }
+
+        // 4) 复用关系页的分页元数据，组装最终 VO 页
+        IPage<UserVO> result = new Page<>(fansPage.getCurrent(), fansPage.getSize(), fansPage.getTotal());
+        result.setRecords(voList);
+        return result;
     }
 }

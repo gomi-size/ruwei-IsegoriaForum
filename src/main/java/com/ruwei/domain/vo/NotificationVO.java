@@ -1,12 +1,11 @@
-package com.ruwei.domain.empty;
+package com.ruwei.domain.vo;
 
-import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+
 import java.io.Serializable;
 import java.util.Date;
-import lombok.Data;
 
 /**
  * 通知表(历史存储/消息中心真相源)
@@ -14,22 +13,23 @@ import lombok.Data;
  */
 @TableName(value ="notification")
 @Data
-public class Notification implements Serializable {
+public class NotificationVO implements Serializable {
+
     /**
-     * 
-     */
-    @TableId(type = IdType.ASSIGN_ID)
+     * 方便查询
+      */
     private Long id;
 
     /**
-     * 接收者
-     */
-    private Long receiverId;
-
-    /**
-     * 触发者
+     * 触发者内部 id（= notification.senderId，保留作引用 / 前端按需使用）
      */
     private Long senderId;
+
+    /**
+     * 触发者展示信息（瘦身版，见 {@link SenderVO}）。
+     * 由后端在查询时按 senderId 批量补全，前端无需再单独拉取。
+     */
+    private SenderVO sender;
 
     /**
      * 1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏
@@ -42,19 +42,9 @@ public class Notification implements Serializable {
     private Integer targetType;
 
     /**
-     * 关联对象id(关注类=被关注者内部id)
-     */
-    private Long targetId;
-
-    /**
      * 预览文案
      */
     private String content;
-
-    /**
-     * 业务幂等键(如 like:{uid}:{postId}), 防重复通知
-     */
-    private String bizKey;
 
     /**
      * 0未读 1已读

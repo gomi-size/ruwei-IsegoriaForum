@@ -10,7 +10,7 @@ import lombok.Data;
  * 关注关系表
  * @TableName userFollow
  */
-@TableName(value ="userFollow")
+@TableName(value ="user_follow")
 @Data
 public class UserFollow {
     /**

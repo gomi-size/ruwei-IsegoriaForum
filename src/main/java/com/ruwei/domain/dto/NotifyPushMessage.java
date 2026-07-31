@@ -17,7 +17,7 @@ public class NotifyPushMessage implements Serializable {
      */
     private Long receiverId;
     /**
-     * 1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏
+     * 1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏 8转发
      */
     private Integer type;
     /**
