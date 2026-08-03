@@ -73,6 +73,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                 ErrorCode.PARAMS_ERROR, "密码不能全为数字");
         ThrowUtils.throwIf(!checkPassword.equals(password),ErrorCode.PARAMS_ERROR,"两次密码不相等");
 
+        boolean exists = lambdaQuery().eq(User::getUsername, username).exists();
+        ThrowUtils.throwIf(exists,ErrorCode.OPERATION_ERROR,"用户名已被注册了");
+
         //2.加密密码
         String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
         User user = BeanUtil.copyProperties(userRegisterDTO, User.class);

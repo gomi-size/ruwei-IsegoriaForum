@@ -57,6 +57,12 @@
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>1.39.0</version> <!-- 使用最新稳定版 -->
         </dependency>
+        <!-- Sa-Token Redis 持久层：登录态存入 Redis，支持分布式共享 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-dao-redis</artifactId>
+            <version>1.39.0</version>
+        </dependency>
 
         <!--hutool-->
         <dependency>
