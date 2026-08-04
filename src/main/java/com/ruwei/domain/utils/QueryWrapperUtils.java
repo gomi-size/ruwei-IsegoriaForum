@@ -3,16 +3,18 @@ package com.ruwei.domain.utils;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.ruwei.common.BusinessException;
+import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.domain.dto.BoardQueryDTO;
 import com.ruwei.domain.dto.NotificationQueryDTO;
 import com.ruwei.domain.dto.UserQueryDTO;
 import com.ruwei.domain.empty.Board;
+import com.ruwei.domain.empty.BoardFollow;
 import com.ruwei.domain.empty.Notification;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -151,8 +153,9 @@ public class QueryWrapperUtils {
         QueryWrapper<Notification> queryWrapper = new QueryWrapper<>();
         // 只查当前用户的通知
         queryWrapper.eq("receiverId", receiverId);
-        // 按类型过滤：type 为 null 时不过滤，查全部类型
-        queryWrapper.eq(dto.getType()!=0, "type", dto.getType());
+        // 按类型过滤：type 为 null 或 0 时不过滤，查全部类型（避免 Integer 拆箱 NPE）
+        Integer type = dto.getType();
+        queryWrapper.eq(type != null && type != 0, "type", type);
         // 按时间降序，最新在前
         queryWrapper.orderByDesc("createdAt");
         return queryWrapper;
@@ -202,6 +205,44 @@ public class QueryWrapperUtils {
             // 默认按关注数倒序（热门板块优先）
             queryWrapper.orderByDesc("followCount");
         }
+        return queryWrapper;
+    }
+
+    /**
+     * 「我关注的板块」关系查询条件，用于分页 {@code board_follow} 表。
+     *
+     * <p>条件：{@code userId = 当前用户内部 id}（本表 userId 统一存内部主键，与 user_follow 约定一致），
+     * 按 {@code createdAt} 倒序。</p>
+     *
+     * @param userId 关注者内部 id（即 Sa-Token loginId）
+     * @return 已拼好条件的 QueryWrapper（作用在 board_follow 表）
+     */
+    public static QueryWrapper<BoardFollow> getBoardFollowQueryWrapper(Long userId) {
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "userId 不能为空");
+        }
+        QueryWrapper<BoardFollow> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("userId", userId)
+                .orderByDesc("createdAt");
+        return queryWrapper;
+    }
+
+    /**
+     * 「我创建的板块的粉丝」关系查询条件，用于分页 {@code board_follow} 表。
+     *
+     * <p>条件：{@code boardId IN (我创建的板块 id 集合)}，按 {@code createdAt} 倒序。
+     * 入参为空集合时抛参数异常（由调用方保证「未创建板块则直接返回空页」）。</p>
+     *
+     * @param boardIds 我创建的板块内部 id 集合
+     * @return 已拼好条件的 QueryWrapper（作用在 board_follow 表）
+     */
+    public static QueryWrapper<BoardFollow> getBoardFansQueryWrapper(Collection<Long> boardIds) {
+        if (boardIds == null || boardIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "boardIds 不能为空");
+        }
+        QueryWrapper<BoardFollow> queryWrapper = new QueryWrapper<>();
+        queryWrapper.in("boardId", boardIds)
+                .orderByDesc("createdAt");
         return queryWrapper;
     }
 }

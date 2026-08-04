@@ -20,21 +20,21 @@ public class BoardFollow implements Serializable {
     /**
      * 
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**
-     * 
+     * 关注者的Id
      */
-    private Long userid;
+    private Long userId;
 
     /**
-     * 
+     * 板块的Id
      */
     private Long boardId;
 
     /**
-     * 
+     * 关注时间
      */
     private Date createdAt;
 

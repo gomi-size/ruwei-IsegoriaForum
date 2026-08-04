@@ -10,7 +10,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
+import com.ruwei.component.notification.Publisher.NotificationPublisher;
 import com.ruwei.domain.dto.NotificationQueryDTO;
+import com.ruwei.domain.dto.NotifyPushMessage;
+import com.ruwei.domain.dto.SendNotificationDTO;
 import com.ruwei.domain.empty.Notification;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.vo.NotificationVO;
@@ -23,6 +26,7 @@ import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +43,9 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private NotificationPublisher publisher;
 
     /**
      * 查看用户有多少未读信息
@@ -60,7 +67,6 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
         long loginId = StpUtil.getLoginIdAsLong();
         QueryWrapper<Notification> queryWrapper =
                 QueryWrapperUtils.getNotificationQueryWrapper(loginId, notificationQueryDTO);
-        //2081585972414304257
         Page<Notification> page = this.page(
                 new Page<>(notificationQueryDTO.getCurrent(), notificationQueryDTO.getPageSize()),
                 queryWrapper);
@@ -89,11 +95,9 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
         } else {
             senderMap = Collections.emptyMap();
         }
-        if(senderMap.isEmpty()){
-            return new Page<>(notificationQueryDTO.getCurrent(), notificationQueryDTO.getPageSize());
-        }
 
-        // 2) 转 VO 并把发送者信息填进去；convert 会保留 total/current/size 分页元数据
+        // 2) 转 VO 并把发送者信息填进去；convert 会保留 total/current/size 分页元数据。
+        //    注意：sender 查不到（已注销/删除）或为 null 时不丢弃通知本体，sender 置 null 由前端兜底展示
         return page.convert(notification -> {
             NotificationVO vo = BeanUtil.copyProperties(notification, NotificationVO.class);
             vo.setSender(senderMap.get(notification.getSenderId()));
@@ -108,6 +112,10 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
     @Override
     public void readMessage(List<Long> ids) {
         long loginId = StpUtil.getLoginIdAsLong();
+        Long count = lambdaQuery().eq(Notification::getReceiverId, loginId)
+                .eq(Notification::getIsRead, 0)
+                .count();
+        ThrowUtils.throwIf(count<=0,ErrorCode.NOT_FOUND_ERROR,"无已读消息");
         LambdaUpdateWrapper<Notification> lambdaUpdateWrapper =new LambdaUpdateWrapper<>();
         lambdaUpdateWrapper.eq(Notification::getReceiverId,loginId)
                 .eq(Notification::getIsRead,0);
@@ -119,6 +127,52 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
         boolean update = update(lambdaUpdateWrapper);
 
         ThrowUtils.throwIf(!update,ErrorCode.OPERATION_ERROR,"更新失败");
+    }
+
+    /**
+     * 通用通知写入并实时推送（幂等：同一 {@code bizKey} 已存在则跳过）。
+     *
+     * <p>供各业务事件监听器复用：幂等检查 → 落库 {@code notification} → 组装
+     * {@code NotifyPushMessage} → {@link NotificationPublisher#push} WS 推送。
+     * 并发下同一 bizKey 同时到达时，由 {@code uk_biz} 唯一索引兜底（DuplicateKey 视为幂等跳过）。</p>
+     */
+    @Override
+    public boolean sendNotification(SendNotificationDTO dto) {
+        // 幂等：同一 bizKey 已存在则跳过，不重复落库/推送
+        Long exists = lambdaQuery().eq(Notification::getBizKey, dto.getBizKey()).count();
+        if (exists != null && exists > 0) {
+            return false;
+        }
+
+        Notification n = new Notification();
+        n.setReceiverId(dto.getReceiverId());
+        n.setSenderId(dto.getSenderId());
+        n.setType(dto.getType());
+        n.setTargetType(dto.getTargetType());
+        n.setTargetId(dto.getTargetId());
+        n.setContent(dto.getContent());
+        n.setBizKey(dto.getBizKey());
+        n.setIsRead(0);
+        n.setCreatedAt(new Date());
+        try {
+            save(n);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // 并发重复插入：唯一索引 uk_biz 兜底，视为幂等跳过
+            return false;
+        }
+
+        // 实时推送
+        NotifyPushMessage push = new NotifyPushMessage();
+        push.setNotificationId(n.getId());
+        push.setReceiverId(dto.getReceiverId());
+        push.setType(dto.getType());
+        push.setSenderId(dto.getSenderId());
+        push.setTargetType(dto.getTargetType());
+        push.setTargetId(dto.getTargetId());
+        push.setContent(dto.getContent());
+        push.setCreatedAt(n.getCreatedAt().getTime());
+        publisher.push(dto.getReceiverId(), push);
+        return true;
     }
 }
 

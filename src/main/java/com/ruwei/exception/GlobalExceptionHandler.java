@@ -1,8 +1,11 @@
-package com.ruwei.common;
+package com.ruwei.exception;
 
 import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
+import com.ruwei.common.BaseResponse;
+import com.ruwei.common.ErrorCode;
+import com.ruwei.common.ResultUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

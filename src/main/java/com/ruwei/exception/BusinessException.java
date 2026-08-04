@@ -1,5 +1,6 @@
-package com.ruwei.common;
+package com.ruwei.exception;
 
+import com.ruwei.common.ErrorCode;
 import lombok.Getter;
 
 @Getter

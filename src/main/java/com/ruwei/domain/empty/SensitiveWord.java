@@ -25,7 +25,7 @@ public class SensitiveWord {
     /**
      * 自增主键
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**

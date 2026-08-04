@@ -2,7 +2,7 @@ package com.ruwei.service.impl;
 
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ruwei.common.BusinessException;
+import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;

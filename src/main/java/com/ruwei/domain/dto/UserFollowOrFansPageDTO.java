@@ -1,30 +1,23 @@
 package com.ruwei.domain.dto;
 
+import com.ruwei.common.PageRequest;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 
 /**
- * 用户查询条件（入参 DTO）。
+ * 用户关注/粉丝列表分页查询条件（入参 DTO）。
+ * 分页参数继承自 {@link PageRequest}。
  */
 @Data
-public class UserFollowOrFansPageDTO implements Serializable {
+@EqualsAndHashCode(callSuper = true)
+public class UserFollowOrFansPageDTO extends PageRequest implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     /**
-     * 当前页码，从 1 开始，默认 1
-     */
-    private long current = 1;
-
-    /**
-     * 每页条数，默认 10
-     */
-    private long pageSize = 10;
-
-
-    /**
-     * 内部主键 id（雪花 ASSIGN_ID），精确匹配
+     * 内部主键 id（预留，当前未参与过滤）
      */
     private Long id;
 

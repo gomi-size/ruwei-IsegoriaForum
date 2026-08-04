@@ -25,7 +25,7 @@ public class NotifyPushMessage implements Serializable {
      */
     private Long senderId;
     /**
-     * 1帖子 2用户
+     * 1帖子 2用户 3板块
      */
     private Integer targetType;
     /**

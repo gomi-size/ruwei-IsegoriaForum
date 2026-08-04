@@ -3,6 +3,7 @@ package com.ruwei.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.ruwei.domain.dto.NotificationQueryDTO;
+import com.ruwei.domain.dto.SendNotificationDTO;
 import com.ruwei.domain.empty.Notification;
 import com.ruwei.domain.vo.NotificationVO;
 
@@ -35,4 +36,17 @@ public interface NotificationService extends IService<Notification> {
      * @param ids
      */
     void readMessage(List<Long> ids);
+
+    /**
+     * 通用通知写入并实时推送（幂等：同一 {@code bizKey} 已存在则跳过，不重复落库/推送）。
+     *
+     * <p>供各业务事件监听器（关注用户 / 关注板块 / 点赞 / 评论……）复用：
+     * 幂等检查 → 落库 {@code notification} → 组装 {@code NotifyPushMessage} → WS 推送，
+     * 避免每个监听器重复实现同一套逻辑。调用方负责生成幂等键 {@code bizKey} 与展示文案 {@code content}，
+     * 字段含义见 {@link SendNotificationDTO}。</p>
+     *
+     * @param dto 通知入参（接收者/触发者/类型/关联对象/文案/幂等键）
+     * @return 是否真正写入并推送（幂等跳过返回 false）
+     */
+    boolean sendNotification(SendNotificationDTO dto);
 }

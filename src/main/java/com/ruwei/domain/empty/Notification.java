@@ -37,12 +37,13 @@ public class Notification implements Serializable {
     private Integer type;
 
     /**
-     * 1帖子 2评论
+     * 1帖子 2用户 3板块
+     * （2=用户：targetId 指向被关注者主页；3=板块：targetId 指向板块主页）
      */
     private Integer targetType;
 
     /**
-     * 关联对象id(关注类=被关注者内部id)
+     * 关联对象内部 id（关注用户=被关注者内部 id；关注板块=板块内部 id）
      */
     private Long targetId;
 

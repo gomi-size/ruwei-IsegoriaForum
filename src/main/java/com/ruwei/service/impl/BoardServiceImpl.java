@@ -183,7 +183,7 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
      */
     @Override
     public void updateBoard(BoardUpdateDTO boardUpdateDTO) {
-        // ===== 参数校验 =====
+        // 1.入参进行校验
         ThrowUtils.throwIf(BeanUtil.isEmpty(boardUpdateDTO), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
 
         Boolean isAdmin = userService.isAdmin();
@@ -195,14 +195,18 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
         // 关键字段非空校验
         ThrowUtils.throwIf(boardUpdateDTO.getId() == null, ErrorCode.PARAMS_ERROR, "板块ID不能为空");
         String name = boardUpdateDTO.getName();
+        ThrowUtils.throwIf(StrUtil.isBlank(name), ErrorCode.PARAMS_ERROR, "板块名称不能为空");
 
-        // 如果不为空就需要进行校验
-        if(StrUtil.isNotBlank(name)) {
-            ThrowUtils.throwIf(name.length() < 2 || name.length() > 12,
-                    ErrorCode.PARAMS_ERROR, "吧名长度必须为2~12位");
-            ThrowUtils.throwIf(name.matches("^\\d+$"),
-                    ErrorCode.PARAMS_ERROR, "吧名不能全为数字");
-        }
+        // 2.查看板块是否存在
+        Long id = boardUpdateDTO.getId();
+        Board oldBoard = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(oldBoard), ErrorCode.NOT_FOUND_ERROR, "修改失败,该吧不存在");
+
+        //3.校验后对输入的参数进行校验
+        ThrowUtils.throwIf(name.length() < 2 || name.length() > 12,
+                ErrorCode.PARAMS_ERROR, "吧名长度必须为2~12位");
+        ThrowUtils.throwIf(name.matches("^\\d+$"),
+                ErrorCode.PARAMS_ERROR, "吧名不能全为数字");
 
         // 简介为选填，非空时最多 200 字
         String description = boardUpdateDTO.getDescription();
@@ -211,7 +215,7 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
                     ErrorCode.PARAMS_ERROR, "简介最多200字");
         }
 
-        // ===== 敏感词扫描与替换（确保入库不含违规敏感词）=====
+        //4.敏感词扫描与替换（确保入库不含违规敏感词）
         name = scrubText(name, "吧名");
         boardUpdateDTO.setName(name);
         if (StrUtil.isNotBlank(description)) {
@@ -219,15 +223,13 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
             boardUpdateDTO.setDescription(description);
         }
 
-        // 板块存在性校验
-        Long id = boardUpdateDTO.getId();
-        Board oldBoard = getById(id);
-        ThrowUtils.throwIf(BeanUtil.isEmpty(oldBoard), ErrorCode.NOT_FOUND_ERROR, "修改失败,该吧不存在");
-
+        //5判断传递板块的名字是否是和之前的一样
         boolean result;
         if (oldBoard.getName().equals(name)) {
+            //一样直接修改
             result = updateById(BeanUtil.copyProperties(boardUpdateDTO, Board.class));
         } else {
+            //不一样需要查询后进修改
             boolean exists = lambdaQuery().eq(Board::getName, name).exists();
             ThrowUtils.throwIf(exists, ErrorCode.PARAMS_ERROR, "改吧名已经存在");
             result = updateById(BeanUtil.copyProperties(boardUpdateDTO, Board.class));

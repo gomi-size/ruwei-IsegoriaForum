@@ -1,5 +1,7 @@
 package com.ruwei.common;
 
+import com.ruwei.exception.BusinessException;
+
 public class ThrowUtils {
 
     /**
