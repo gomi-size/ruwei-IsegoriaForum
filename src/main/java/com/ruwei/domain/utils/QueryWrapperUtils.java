@@ -211,8 +211,8 @@ public class QueryWrapperUtils {
     /**
      * 「我关注的板块」关系查询条件，用于分页 {@code board_follow} 表。
      *
-     * <p>条件：{@code userId = 当前用户内部 id}（本表 userId 统一存内部主键，与 user_follow 约定一致），
-     * 按 {@code createdAt} 倒序。</p>
+     * <p>条件：{@code userId = 当前用户内部 id}（本表 userId 统一存内部主键，与 user_follow 约定一致）
+     * 且 {@code status = 1}（仅关注中，排除已取消的记录），按 {@code createdAt} 倒序。</p>
      *
      * @param userId 关注者内部 id（即 Sa-Token loginId）
      * @return 已拼好条件的 QueryWrapper（作用在 board_follow 表）
@@ -223,6 +223,7 @@ public class QueryWrapperUtils {
         }
         QueryWrapper<BoardFollow> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("userId", userId)
+                .eq("status", 1)
                 .orderByDesc("createdAt");
         return queryWrapper;
     }
@@ -230,8 +231,8 @@ public class QueryWrapperUtils {
     /**
      * 「我创建的板块的粉丝」关系查询条件，用于分页 {@code board_follow} 表。
      *
-     * <p>条件：{@code boardId IN (我创建的板块 id 集合)}，按 {@code createdAt} 倒序。
-     * 入参为空集合时抛参数异常（由调用方保证「未创建板块则直接返回空页」）。</p>
+     * <p>条件：{@code boardId IN (我创建的板块 id 集合)} 且 {@code status = 1}（仅关注中），
+     * 按 {@code createdAt} 倒序。入参为空集合时抛参数异常（由调用方保证「未创建板块则直接返回空页」）。</p>
      *
      * @param boardIds 我创建的板块内部 id 集合
      * @return 已拼好条件的 QueryWrapper（作用在 board_follow 表）
@@ -242,6 +243,7 @@ public class QueryWrapperUtils {
         }
         QueryWrapper<BoardFollow> queryWrapper = new QueryWrapper<>();
         queryWrapper.in("boardId", boardIds)
+                .eq("status", 1)
                 .orderByDesc("createdAt");
         return queryWrapper;
     }

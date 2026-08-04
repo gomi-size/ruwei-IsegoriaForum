@@ -34,6 +34,11 @@ public class BoardFollow implements Serializable {
     private Long boardId;
 
     /**
+     * 关注状态：1-关注 2-已取消关注（软标记保留历史，对齐 user_follow.status 语义）
+     */
+    private Integer status;
+
+    /**
      * 关注时间
      */
     private Date createdAt;

@@ -40,8 +40,8 @@ import java.util.stream.Collectors;
 * （= Sa-Token loginId = 雪花 ASSIGN_ID），boardId 为板块内部主键。
 * 与 user_follow 的 followerId/followeeId 存内部 id 的约定保持一致，杜绝内外 id 混用。</p>
 *
-* <p><b>与 user_follow 的差异：</b>本表无 status 字段（无软取消状态），
-* 取消关注 = 物理删除关注记录；关注自己的板块是允许的（吧主可关注自己的吧）。</p>
+* <p><b>与 user_follow 的差异：</b>本表有 status 字段（1=关注 2=已取消关注，软标记保留历史），
+* 取消关注 = 置 status=2 而非物理删除；关注自己的板块是允许的（吧主可关注自己的吧）。</p>
 */
 @Service
 public class BoardFollowServiceImpl extends ServiceImpl<BoardFollowMapper, BoardFollow>
@@ -57,8 +57,9 @@ public class BoardFollowServiceImpl extends ServiceImpl<BoardFollowMapper, Board
     private ApplicationEventPublisher eventPublisher;
 
     /**
-     * 关注板块（幂等：已关注时再次调用视为重复操作并提示）。
-     * 板块关注数 +1（DB 层原子自增）。
+     * 关注板块（幂等状态机，对齐 {@code UserFollowServiceImpl.followUser}）：
+     * 无记录 → 新增（status=1）；曾取消（status=2）→ 恢复为 1；已关注（status=1）→ 拒绝重复。
+     * 板块关注数 +1（DB 层原子自增），成功后发布 {@link BoardFollowEvent} 通知吧主。
      * @param boardId 板块内部主键
      */
     @Override
@@ -72,29 +73,49 @@ public class BoardFollowServiceImpl extends ServiceImpl<BoardFollowMapper, Board
         Board board = boardService.getById(boardId);
         ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
 
-        // 2. 幂等：已关注则拒绝重复关注（与 user_follow「无法重复关注」对齐）
-        boolean exists = lambdaQuery().eq(BoardFollow::getUserId, loginId)
+        // 2. 查已有记录（均以内部 id 为键）
+        BoardFollow one = lambdaQuery().eq(BoardFollow::getUserId, loginId)
                 .eq(BoardFollow::getBoardId, boardId)
-                .exists();
-        ThrowUtils.throwIf(exists, ErrorCode.OPERATION_ERROR, "无法重复关注");
+                .one();
 
-        // 3. 新增关注记录（本表无 status 字段，取消关注 = 物理删除记录）
-        BoardFollow boardFollow = new BoardFollow();
-        boardFollow.setUserId(loginId);
-        boardFollow.setBoardId(boardId);
-        boardFollow.setCreatedAt(new Date());
-        boolean saved = save(boardFollow);
-        ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "关注失败");
+        if (BeanUtil.isEmpty(one)) {
+            // 新增关注（status=1）
+            BoardFollow boardFollow = new BoardFollow();
+            boardFollow.setUserId(loginId);
+            boardFollow.setBoardId(boardId);
+            boardFollow.setStatus(1);
+            boardFollow.setCreatedAt(new Date());
+            boolean saved = save(boardFollow);
+            ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "关注失败");
 
-        // 4. 板块关注数 +1
-        ThrowUtils.throwIf(!incrementBoardFollowCount(boardId, 1), ErrorCode.OPERATION_ERROR, "关注失败");
+            // 板块关注数 +1
+            ThrowUtils.throwIf(!incrementBoardFollowCount(boardId, 1), ErrorCode.OPERATION_ERROR, "关注失败");
 
-        // 5. 发布板块关注事件（AFTER_COMMIT 后由 BoardFollowEventListener 通知吧主）
-        eventPublisher.publishEvent(new BoardFollowEvent(this, loginId, boardId, board.getCreatorId()));
+            // 发布板块关注事件（AFTER_COMMIT 后由 BoardFollowEventListener 通知吧主）
+            eventPublisher.publishEvent(new BoardFollowEvent(this, loginId, boardId, board.getCreatorId()));
+        } else if (one.getStatus() == 2) {
+            // 曾取消关注，恢复关注（复用记录行，不新插）
+            boolean update = lambdaUpdate().eq(BoardFollow::getUserId, loginId)
+                    .eq(BoardFollow::getBoardId, boardId)
+                    .set(BoardFollow::getStatus, 1)
+                    .update();
+            ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "关注失败");
+
+            // 板块关注数 +1
+            ThrowUtils.throwIf(!incrementBoardFollowCount(boardId, 1), ErrorCode.OPERATION_ERROR, "关注失败");
+
+            // 发布板块关注事件（AFTER_COMMIT 后由 BoardFollowEventListener 通知吧主）
+            eventPublisher.publishEvent(new BoardFollowEvent(this, loginId, boardId, board.getCreatorId()));
+        } else {
+            // status=1 已关注
+            ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "无法重复关注");
+        }
     }
 
     /**
-     * 取消关注板块（物理删除关注记录，板块关注数 -1）。
+     * 取消关注板块（幂等状态机，对齐 {@code UserFollowServiceImpl.cancelFollowUser}）：
+     * 关注中（status=1）→ 置为 2（软取消，保留历史记录），板块关注数 -1；
+     * 已取消（status=2）→ 拒绝重复取消。取关不发布关注通知。
      * @param boardId 板块内部主键
      */
     @Override
@@ -112,16 +133,23 @@ public class BoardFollowServiceImpl extends ServiceImpl<BoardFollowMapper, Board
                 .one();
         ThrowUtils.throwIf(BeanUtil.isEmpty(one), ErrorCode.NOT_FOUND_ERROR, "没有关注信息，请刷新页面");
 
-        // 物理删除（无 status 软删字段，与 user_follow 的 status=2 方案不同）
-        boolean removed = removeById(one.getId());
-        ThrowUtils.throwIf(!removed, ErrorCode.OPERATION_ERROR, "取消关注失败");
+        if (one.getStatus() == 1) {
+            // 关注中 → 软取消（status=2，保留历史）
+            boolean update = lambdaUpdate().eq(BoardFollow::getUserId, loginId)
+                    .eq(BoardFollow::getBoardId, boardId)
+                    .set(BoardFollow::getStatus, 2)
+                    .update();
+            ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "取消关注失败");
 
-        // 板块关注数 -1
-        incrementBoardFollowCount(boardId, -1);
+            // 板块关注数 -1
+            incrementBoardFollowCount(boardId, -1);
+        } else if (one.getStatus() == 2) {
+            ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "已经处于取消关注状态");
+        }
     }
 
     /**
-     * 当前登录用户是否已关注该板块。
+     * 当前登录用户是否已关注该板块（仅统计 status=1 关注中，已取消不算关注）。
      * @param boardId 板块内部主键
      * @return 是否已关注
      */
@@ -131,6 +159,7 @@ public class BoardFollowServiceImpl extends ServiceImpl<BoardFollowMapper, Board
         long loginId = StpUtil.getLoginIdAsLong();
         return lambdaQuery().eq(BoardFollow::getUserId, loginId)
                 .eq(BoardFollow::getBoardId, boardId)
+                .eq(BoardFollow::getStatus, 1)
                 .exists();
     }
 

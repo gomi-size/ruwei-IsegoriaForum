@@ -8,10 +8,11 @@
             <id property="id" column="id" jdbcType="BIGINT"/>
             <result property="userId" column="userId" jdbcType="BIGINT"/>
             <result property="boardId" column="boardId" jdbcType="BIGINT"/>
+            <result property="status" column="status" jdbcType="TINYINT"/>
             <result property="createdAt" column="createdAt" jdbcType="TIMESTAMP"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        id,userId,boardId,createdAt
+        id,userId,boardId,status,createdAt
     </sql>
 </mapper>

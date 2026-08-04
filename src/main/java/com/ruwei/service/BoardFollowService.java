@@ -21,20 +21,21 @@ import com.ruwei.domain.vo.UserVO;
 public interface BoardFollowService extends IService<BoardFollow> {
 
     /**
-     * 关注板块（幂等：已关注时再次调用视为重复操作并提示）。
-     * 板块关注数 +1。
+     * 关注板块（幂等状态机：无记录→新增 status=1；曾取消→恢复为 1；已关注→拒绝重复）。
+     * 板块关注数 +1，成功后发布板块关注事件通知吧主。
      * @param boardId 板块内部主键
      */
     void followBoard(Long boardId);
 
     /**
-     * 取消关注板块（物理删除关注记录，板块关注数 -1）。
+     * 取消关注板块（幂等状态机：关注中 status=1→置为 2 软取消保留历史；已取消→拒绝重复）。
+     * 板块关注数 -1，取关不发布关注通知。
      * @param boardId 板块内部主键
      */
     void cancelFollowBoard(Long boardId);
 
     /**
-     * 当前登录用户是否已关注该板块。
+     * 当前登录用户是否已关注该板块（仅统计 status=1 关注中，已取消不算关注）。
      * @param boardId 板块内部主键
      * @return 是否已关注
      */
