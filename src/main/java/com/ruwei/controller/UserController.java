@@ -154,8 +154,9 @@ public class UserController {
      * 仅管理员可访问 —— @SaCheckRole("admin")（普通用户看自己请用 /user/userInfo）
      */
     @SaCheckRole("admin")
-    @GetMapping("/{id}")
-    public BaseResponse<User> getUserInfo(@PathVariable Long id) {
+    @GetMapping("/getUserInfo")
+    public BaseResponse<User> getUserInfo( @RequestParam  Long id) {
+        ThrowUtils.throwIf(id==null,ErrorCode.PARAMS_ERROR,"传入的用户id不能为空");
         User user = userService.getById(id);
         ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         return ResultUtils.success(user);

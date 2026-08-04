@@ -62,7 +62,9 @@ public class FollowEventListener {
         n.setType(4);                 // 4 = 关注
         n.setTargetType(2);           // 2 = 用户（指向被关注者主页）
         n.setTargetId(followeeId);    // 前端可据此跳转其主页
-        n.setContent(nickname+"在"+todayStr+"时间，关注了你");
+        if(n.getType()==4){
+            n.setContent(nickname+"在"+todayStr+"时间，关注了你");
+        }
         n.setBizKey(bizKey);
         n.setIsRead(0);
         n.setCreatedAt(new Date());

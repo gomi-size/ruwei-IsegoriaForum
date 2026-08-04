@@ -2,6 +2,9 @@ server:
   port: 8188
   servlet:
     context-path: /api
+  error:
+    include-stacktrace: always
+    include-message: always
 
 # ===== 跨域配置（CORS）—— 修复 #6 =====
 # 允许跨域访问的前端源（协议+域名+端口，必须精确匹配）。
@@ -71,6 +74,9 @@ logging:
   level:
     com.ruwei.mapper: debug
     com.ruwei.mapper.SensitiveWordMapper: warn
+    org.springdoc: DEBUG
+    io.swagger: DEBUG
+    org.springdoc.webmvc: DEBUG
 
 springdoc:
   swagger-ui:

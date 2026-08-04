@@ -55,15 +55,12 @@
         <dependency>
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot3-starter</artifactId>
-            <version>1.39.0</version> <!-- 使用最新稳定版 -->
         </dependency>
         <!-- Sa-Token Redis 持久层：登录态存入 Redis，支持分布式共享 -->
         <dependency>
             <groupId>cn.dev33</groupId>
-            <artifactId>sa-token-dao-redis</artifactId>
-            <version>1.39.0</version>
+            <artifactId>sa-token-redis-jackson</artifactId>
         </dependency>
-
         <!--hutool-->
         <dependency>
             <groupId>cn.hutool</groupId>
@@ -88,6 +85,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
+
+        <!-- Redis：Sa-Token 登录态存储 + 业务缓存 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -102,6 +105,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
                 <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Sa-Token BOM：锁定所有 sa-token-* 模块为同一版本，避免 starter 与 redis-jackson 版本不一致导致 NoSuchFieldError -->
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-dependencies</artifactId>
+                <version>1.40.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

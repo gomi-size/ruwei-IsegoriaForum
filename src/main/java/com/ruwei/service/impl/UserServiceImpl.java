@@ -23,8 +23,13 @@ import com.ruwei.mapper.UserFollowMapper;
 import com.ruwei.service.UserService;
 import com.ruwei.mapper.UserMapper;
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import jakarta.annotation.Resource;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Objects;
 
 /**
 * @author Administrator
@@ -40,6 +45,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private UserFollowMapper userFollowMapper;
+
+    /**
+     * userId 自增计数器（对外编码），基于 Redis 原子自增，保证集群/并发下不重复。
+     */
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    /**
+     * userId 计数器在 Redis 中的 key。
+     */
+    private static final String USER_ID_COUNTER_KEY = "isegoria:user:id:counter";
+
+    /**
+     * userId 默认起始基准（库内无数据时从此起步）。
+     */
+    private static final long USER_ID_BASE = 100000L;
 
     /**
      * 用户注册
@@ -81,8 +102,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User user = BeanUtil.copyProperties(userRegisterDTO, User.class);
         user.setPassword(encryptedPassword);
 
-        //3.TODO 设置userId需要使用redis
-        user.setUserId(100001L);
+        //3.设置 userId：基于 Redis 原子自增，每次注册 +1（首次以库内最大 userId 起步，避免与历史数据冲突）
+        user.setUserId(generateUserId());
 
         //4.设置nikeName
         String pathName="ISEGORIA";
@@ -98,6 +119,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return user;
 
     }
+
+
 
     /**
      * 用户登录
@@ -332,5 +355,28 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         userVO.setIsMutual(isFollowed && isFans);
 
         return userVO;
+    }
+
+    /**
+     * 基于 Redis 原子自增生成对外编码 userId。
+     * <p>首次（Redis 计数器不存在）以「库内已有最大 userId」与默认基准 {@link #USER_ID_BASE} 取大作为起点，
+     * 之后每次 {@code INCR} 保证全局唯一、单调递增；setIfAbsent 仅初始化一次，不会覆盖已自增的值。</p>
+     *
+     * @return 全新的 userId
+     */
+    private Long generateUserId() {
+        // 仅当计数器尚未初始化时，才以库内最大 userId 为基准写入，避免覆盖已自增的计数
+        if (!stringRedisTemplate.hasKey(USER_ID_COUNTER_KEY)) {
+            //查询出最大的id
+            List<Object> objects = baseMapper.selectObjs(new QueryWrapper<User>().select("max(userId)"));
+            Object maxObj = objects.get(0);
+            long dbMax = Objects.nonNull(maxObj) ? ((Number) maxObj).longValue() : 0L;
+
+            long base = Math.max(dbMax, USER_ID_BASE);
+
+            stringRedisTemplate.opsForValue().setIfAbsent(USER_ID_COUNTER_KEY, String.valueOf(base));
+        }
+        // 原子自增，返回自增后的值（首次为 base + 1）
+        return stringRedisTemplate.opsForValue().increment(USER_ID_COUNTER_KEY);
     }
 }

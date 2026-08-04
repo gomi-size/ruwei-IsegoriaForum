@@ -5,8 +5,10 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ruwei.common.BusinessException;
 import com.ruwei.common.ErrorCode;
+import com.ruwei.domain.dto.BoardQueryDTO;
 import com.ruwei.domain.dto.NotificationQueryDTO;
 import com.ruwei.domain.dto.UserQueryDTO;
+import com.ruwei.domain.empty.Board;
 import com.ruwei.domain.empty.Notification;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
@@ -153,6 +155,53 @@ public class QueryWrapperUtils {
         queryWrapper.eq(dto.getType()!=0, "type", dto.getType());
         // 按时间降序，最新在前
         queryWrapper.orderByDesc("createdAt");
+        return queryWrapper;
+    }
+
+    /**
+     * 允许参与排序的字段白名单（防止 orderBy 注入任意列名）。
+     * 与 board 表驼峰列名保持一致。
+     */
+    private static final Set<String> BOARD_ALLOWED_SORT_FIELDS = Set.of(
+            "id", "name", "slug", "followCount", "postCount", "createdAt", "updatedAt", "status"
+    );
+
+    /**
+     * 根据查询条件构造板块表的 QueryWrapper。
+     *
+     * <p>模糊匹配：{@code name}；精确匹配：{@code slug} / {@code creatorId}；
+     * 可选按 {@code sortField} / {@code sortOrder} 排序；默认按 {@code followCount DESC}（关注数倒序）。</p>
+     *
+     * @param boardQueryDTO 查询条件，为 null 时抛参数异常
+     * @return 已拼好条件的 QueryWrapper（作用在 board 表）
+     */
+    public static QueryWrapper<Board> getBoardQueryWrapper(BoardQueryDTO boardQueryDTO) {
+        if (boardQueryDTO == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
+        }
+        String name = boardQueryDTO.getName();
+        String slug = boardQueryDTO.getSlug();
+        String description = boardQueryDTO.getDescription();
+        Long creatorId = boardQueryDTO.getCreatorId();
+        String sortField = boardQueryDTO.getSortField();
+        String sortOrder = boardQueryDTO.getSortOrder();
+
+        QueryWrapper<Board> queryWrapper = new QueryWrapper<>();
+        // 模糊匹配
+        queryWrapper.like(StrUtil.isNotBlank(name), "name", name);
+        queryWrapper.like(StrUtil.isNotBlank(description), "description", description);
+        queryWrapper.like(ObjUtil.isNotNull(slug), "slug", slug);
+        queryWrapper.like(ObjUtil.isNotNull(creatorId), "creatorId", creatorId);
+
+        // 排序：常量在前比较，避免 sortOrder 为 null 时空指针；列名走白名单防注入
+        boolean isAsc = "ascend".equals(sortOrder);
+        boolean canSort = StrUtil.isNotBlank(sortField) && BOARD_ALLOWED_SORT_FIELDS.contains(sortField);
+        if (canSort) {
+            queryWrapper.orderBy( true,isAsc, sortField);
+        } else {
+            // 默认按关注数倒序（热门板块优先）
+            queryWrapper.orderByDesc("followCount");
+        }
         return queryWrapper;
     }
 }
