@@ -29,7 +29,6 @@ CREATE TABLE `post` (
                         `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                         `isDelete` TINYINT DEFAULT 0 COMMENT '逻辑删除: 0未删 1已删(与board表@TableLogic对齐)',
                         PRIMARY KEY (`id`),
-                        UNIQUE KEY `ukPostCode` (`postCode`),
                         KEY `idxBoard` (`boardId`,`isTop`,`createdAt`),
                         KEY `idxUser` (`userId`,`createdAt`),
                         KEY `idxStatus` (`status`),
@@ -45,8 +44,9 @@ CREATE TABLE `post_image` (
                               `width` INT DEFAULT 0 COMMENT '图片宽度(px)',
                               `height` INT DEFAULT 0 COMMENT '图片高度(px)',
                               `sort` INT DEFAULT 0 COMMENT '排序序号(升序，封面取 sort 最小)',
+                              `status` TINYINT DEFAULT 1 COMMENT '所属帖子版本: 1已发布 2草稿 3审核中 4下架',
                               PRIMARY KEY (`id`),
-                              KEY `idxPost` (`postId`)
+                              KEY `idxPostStatus` (`postId`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子图片表';
 
 # 标签
@@ -64,7 +64,22 @@ CREATE TABLE `post_tag` (
                             `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
                             `postId` BIGINT NOT NULL COMMENT '帖子内部id',
                             `tagId` BIGINT NOT NULL COMMENT '标签内部id',
+                            `status` TINYINT DEFAULT 1 COMMENT '所属帖子版本: 1已发布 2草稿 3审核中 4下架',
                             PRIMARY KEY (`id`),
-                            UNIQUE KEY `ukPostTag` (`postId`,`tagId`),
+                            -- 唯一键必须带上 status：同一帖子的同一标签允许同时存在「已发布版」与「审核中版」
+                            UNIQUE KEY `ukPostTag` (`postId`,`tagId`,`status`),
                             KEY `idxTag` (`tagId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子标签关联表';
+
+# ---- 已建库的增量变更（新建库无需执行）----
+ ALTER TABLE `post_image`
+   ADD COLUMN `status` TINYINT DEFAULT 1 COMMENT '所属帖子版本: 1已发布 2草稿 3审核中 4下架',
+   DROP INDEX `idxPost`,
+   ADD KEY `idxPostStatus` (`postId`,`status`);
+ ALTER TABLE `post_tag`
+   ADD COLUMN `status` TINYINT DEFAULT 1 COMMENT '所属帖子版本: 1已发布 2草稿 3审核中 4下架',
+   DROP INDEX `ukPostTag`,
+   ADD UNIQUE KEY `ukPostTag` (`postId`,`tagId`,`status`);
+    ALTER TABLE post DROP INDEX IF EXISTS ukPostCode;
+
+

@@ -18,7 +18,7 @@ public class PostTag implements Serializable {
     /**
      * 主键
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**
@@ -30,6 +30,11 @@ public class PostTag implements Serializable {
      * 标签内部id
      */
     private Long tagId;
+
+    /**
+     * 生命周期状态: 1已发布 2草稿 3审核中 4下架
+     */
+    private Integer status;
 
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;

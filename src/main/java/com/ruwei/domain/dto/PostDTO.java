@@ -1,8 +1,6 @@
 package com.ruwei.domain.dto;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.ruwei.domain.empty.Tag;
-import com.ruwei.domain.vo.TagVO;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -22,6 +20,11 @@ public class PostDTO implements Serializable {
      * 帖子内部主键（编辑时必传；创建时忽略）
      */
     private Long id;
+
+    /**
+     * 对外唯一编码
+     */
+    private String postCode;
 
     /**
      * 所属板块（可为空）
@@ -54,24 +57,36 @@ public class PostDTO implements Serializable {
     private String videoUrl;
 
     /**
-     * 话题（这里就是tag）
+     * 图片地址集合（一次可传多个图片 URL，创建/编辑时全量写入 post_image 表）
      */
-    private List<TagVO> topic;
+    private List<String> imageUrl;
 
     /**
-     * 1公开 2仅粉丝可见 3私密(仅作者)
+     * 话题（传递的 tag 的 id 列表，标签须已存在且未被禁用）
      */
-    private Integer visibility;
+    private List<Long> topicList;
 
     /**
-     * 生命周期状态: 1已发布 2草稿 3审核中 4下架 5删除
+     * 可见性：前端传<b>文字</b>（"公开" / "仅粉丝可见" / "私密"），
+     * 后端经 {@code PostVisibilityEnum} 转成整数（1/2/3）落库。
      */
-    private Integer status;
+    private String Visibility;
 
     /**
-     * 审核结果: 1待审 2通过 3驳回
+     * 生命周期状态：前端传<b>文字</b>，后端经 {@code PostStatusEnum} 转成整数落库。
+     *
+     * <p><b>编辑时仅「草稿」一个取值有效</b>：传 "草稿" 表示另存为草稿（不走审核），
+     * 其余取值一律被忽略并强制送审（status=审核中）。生命周期由创建/编辑/审核流程单向推进，
+     * 作者不能借此字段把帖子直接指定为「已发布」绕过审核。</p>
      */
-    private Integer auditStatus;
+    private String Status;
+
+    /**
+     * 审核结果：前端传<b>文字</b>（"待审" / "通过" / "驳回"）。
+     *
+     * <p><b>仅管理端审核流可写</b>，普通用户创建/编辑时传入无效（后端强制置为「待审」）。</p>
+     */
+    private String AuditStatus;
 
     /**
      * 置顶(重排强插第1/2位)
@@ -92,16 +107,6 @@ public class PostDTO implements Serializable {
      * 位置名称
      */
     private String locationName;
-
-    /**
-     * 图片URL列表（图集，按顺序展示；全量替换语义：编辑时以本次列表为准）
-     */
-    private List<String> images;
-
-    /**
-     * 标签名列表（不存在则自动创建并 useCount+1）
-     */
-    private List<String> tags;
 
 
     @TableField(exist = false)

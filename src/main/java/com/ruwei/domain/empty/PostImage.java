@@ -17,7 +17,7 @@ public class PostImage implements Serializable {
     /**
      * 主键
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**
@@ -44,6 +44,11 @@ public class PostImage implements Serializable {
      * 排序序号(升序，封面取 sort 最小)
      */
     private Integer sort;
+
+    /**
+     * 生命周期状态: 1已发布 2草稿 3审核中 4下架
+     */
+    private Integer status;
 
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;

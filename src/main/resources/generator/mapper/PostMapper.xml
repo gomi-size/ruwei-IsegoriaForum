@@ -6,8 +6,8 @@
 
     <resultMap id="BaseResultMap" type="com.ruwei.domain.empty.Post">
             <id property="id" column="id" jdbcType="BIGINT"/>
-            <result property="postcode" column="postCode" jdbcType="VARCHAR"/>
-            <result property="userid" column="userId" jdbcType="BIGINT"/>
+            <result property="postCode" column="postCode" jdbcType="VARCHAR"/>
+            <result property="userId" column="userId" jdbcType="BIGINT"/>
             <result property="boardId" column="boardId" jdbcType="BIGINT"/>
             <result property="title" column="title" jdbcType="VARCHAR"/>
             <result property="content" column="content" jdbcType="VARCHAR"/>
@@ -20,7 +20,7 @@
             <result property="likeCount" column="likeCount" jdbcType="INTEGER"/>
             <result property="commentCount" column="commentCount" jdbcType="INTEGER"/>
             <result property="collectCount" column="collectCount" jdbcType="INTEGER"/>
-            <result property="viewcount" column="viewCount" jdbcType="INTEGER"/>
+            <result property="viewCount" column="viewCount" jdbcType="INTEGER"/>
             <result property="shareCount" column="shareCount" jdbcType="INTEGER"/>
             <result property="score" column="score" jdbcType="DECIMAL"/>
             <result property="isTop" column="isTop" jdbcType="TINYINT"/>

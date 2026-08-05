@@ -1,8 +1,10 @@
 package com.ruwei.service;
 
 import com.baomidou.mybatisplus.spring.service.IService;
+import com.ruwei.common.BaseResponse;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.empty.Post;
+import com.ruwei.domain.vo.PostVO;
 
 
 /**
@@ -15,9 +17,12 @@ import com.ruwei.domain.empty.Post;
 *   <li>{@code status}（生命周期）：1已发布 2草稿 3审核中 4下架（5删除废弃，删除统一走 {@code isDelete} 逻辑删除）；</li>
 *   <li>{@code auditStatus}（审核结果）：1待审 2通过 3驳回；</li>
 *   <li><b>创建送审</b>：createPost 后 status=3 + auditStatus=1，管理员审核通过才对外可见；</li>
-*   <li><b>编辑先发后审</b>：updatePost 把新内容暂存 pending* 字段并置 status=3+auditStatus=1，
-*       正式字段不动（旧内容继续展示），审核通过才应用 pending、驳回则丢弃；</li>
-*   <li><b>设置状态不走审核</b>：updatePostStatus 由作者直接切换 草稿/发布/下架。</li>
+*   <li><b>编辑先审后发</b>：updatePost 直接把新内容写入正式字段，并置 status=3+auditStatus=1，
+*       审核期间帖子不对外展示，通过后恢复已发布、驳回则下架；</li>
+*   <li><b>作者只能改可见性</b>：updatePostVisibility 设置 公开/仅粉丝可见/私密；
+*       status 属于平台侧的生命周期，由创建/编辑/审核流程单向推进，不开放给作者手动指定；</li>
+*   <li><b>审核只推进状态</b>：待审内容在创建/编辑时已写入正式字段，auditPost 不搬运内容，
+*       仅把 status 推进到 已发布/下架，并把 status=审核中 的图片、标签迁移为最终状态。</li>
 * </ul></p>
 */
 public interface PostService extends IService<Post> {
@@ -27,32 +32,40 @@ public interface PostService extends IService<Post> {
      * 作者取当前登录态；内容过敏感词 filter；写 post + post_image + tag/post_tag；板块帖子数 +1。
      *
      * @param dto 创建入参（title/content 必填，images/tags 可选）
-     * @return 创建后的帖子实体（含对外编码 postCode）
+     * @return 创建后的帖子 {@link PostVO}（含对外编码 postCode；visibility/status/auditStatus
+     *         回显<b>中文文字</b>与入参同一套词汇，雪花 id 序列化为字符串防前端丢精度，
+     *         imageUrl 按 sort 回读、topic 解析为 tag id 列表）
      */
-    Post createPost(PostDTO dto);
+    PostVO createPost(PostDTO dto);
 
     /**
-     * 编辑帖子（先发后审）：
+     * 编辑帖子（先审后发）：
      * <ul>
-     *   <li>草稿（status=2）：直接改正式字段，不走审核；</li>
-     *   <li>已发布/审核中/下架：新内容暂存 pending* 字段 + status=3 + auditStatus=1（旧内容继续对外），
-     *       由管理员审核通过后应用或驳回丢弃。</li>
+     *   <li>草稿（status=2）：另存为一条新的草稿记录，不走审核；</li>
+     *   <li>已发布/审核中/下架：<b>直接修改正式字段</b>（title/content/cover/topic/visibility，
+     *       仅覆盖本次传入的字段），图片与标签全量替换，并置 status=3 审核中 + auditStatus=1 待审。
+     *       审核期间帖子不对外展示，由管理员通过后恢复已发布、驳回则下架。</li>
      * </ul>
      * 仅作者本人可编辑。
      *
      * @param dto 编辑入参（id 必传）
      */
-    void updatePost(PostDTO dto);
+    BaseResponse<String> updatePost(PostDTO dto);
 
     /**
-     * 设置帖子状态（不走审核，作者本人操作）。
-     * 允许设置：1已发布 / 2草稿 / 4下架；审核中（status=3）不允许手动改，等待审核结果。
-     * 草稿→发布时同步置 auditStatus=2（内容未公开过，无需审核）。
+     * 设置帖子可见性（作者本人操作）。
+     * 前端传<b>文字</b>（"公开"/"仅粉丝可见"/"私密"），后端经 {@code PostVisibilityEnum} 转整数（1/2/3）落库。
      *
-     * @param id     帖子内部主键
-     * @param status 目标状态（1/2/4）
+     * <p><b>只改 visibility，不触碰 status / auditStatus</b>：
+     * 生命周期（已发布/草稿/审核中/下架）由创建、编辑、审核三条流程单向推进，作者不能手动指定，
+     * 否则可以把驳回的帖子直接改回「已发布」绕过审核。作者能自由支配的只有可见范围这一维度。</p>
+     *
+     * <p>幂等：目标可见性与当前一致时直接返回成功。可见性与审核状态正交，审核中同样可以调整。</p>
+     *
+     * @param id             帖子内部主键
+     * @param visibilityText 目标可见性文字（"公开"/"仅粉丝可见"/"私密"）
      */
-    void updatePostStatus(Long id, Integer status);
+    void updatePostVisibility(Long id, String visibilityText);
 
     /**
      * 删除帖子（逻辑删除 isDelete=1，作者或管理员）：
@@ -63,12 +76,19 @@ public interface PostService extends IService<Post> {
     void deletePost(Long id);
 
     /**
-     * 管理员审核帖子。
+     * 管理员审核帖子（仅推进状态，不搬运内容）。
+     *
+     * <p>待审内容在 createPost / updatePost 时已直接写入正式字段，审核只做两件事：
+     * 推进 status/auditStatus，并把 status=3 审核中 的图片/标签迁移为最终状态
+     * （同时清理该帖其它历史版本、回退对应标签 useCount）。</p>
+     *
+     * <p><b>前置条件</b>：帖子必须处于 status=3 审核中，否则抛操作异常（防重复审核 / 误操作）。
+     * 板块帖子数已在创建时计入，审核环节不累加。</p>
      *
      * @param id   帖子内部主键
-     * @param pass true=通过（应用 pending 覆盖正式内容 → status=1 + auditStatus=2，首次发布时板块帖子数 +1）；
-     *             false=驳回（丢弃 pending；编辑驳回→恢复旧版对外 status=1+auditStatus=3，
-     *             创建驳回→帖子不可见 status=4+auditStatus=3）
+     * @param pass true=通过（status=1 已发布 + auditStatus=2 通过）；
+     *             false=驳回（status=4 下架 + auditStatus=3 驳回；正式字段已是新内容、无旧版可回退，
+     *             故不能对外展示，作者修改后可重新提交审核）
      */
     void auditPost(Long id, Boolean pass);
 }

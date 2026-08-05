@@ -3,10 +3,8 @@ package com.ruwei.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
@@ -16,6 +14,7 @@ import com.ruwei.domain.dto.UserFollowOrFansPageDTO;
 import com.ruwei.domain.dto.UserQueryDTO;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
+import com.ruwei.domain.utils.CountUtils;
 import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.service.UserFollowService;
@@ -27,7 +26,6 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -117,16 +115,16 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             ThrowUtils.throwIf(!save, ErrorCode.OPERATION_ERROR, "关注失败");
 
             // 我的关注数 +1
-            ThrowUtils.throwIf(!incrementCount(User::getId, loginId, "followCount", 1),
+            ThrowUtils.throwIf(!CountUtils.increment(userService, User::getId, loginId, "followCount", 1),
                     ErrorCode.OPERATION_ERROR, "关注失败");
 
             // 对方粉丝数 +1（按内部 id 匹配，避免内外 id 混用）
-            incrementCount(User::getId, targetId, "fansCount", 1);
+            CountUtils.increment(userService, User::getId, targetId, "fansCount", 1);
 
 
             // 互粉：若对方也已关注我，则我的粉丝数也 +1
             if (isMutualFollow(loginId, targetId)) {
-                incrementCount(User::getId, loginId, "fansCount", 1);
+                CountUtils.increment(userService, User::getId, loginId, "fansCount", 1);
             }
             //推送消息
             eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
@@ -140,12 +138,12 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
                     .update();
             ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "关注失败");
 
-            ThrowUtils.throwIf(!incrementCount(User::getId, loginId, "followCount", 1),
+            ThrowUtils.throwIf(!CountUtils.increment(userService, User::getId, loginId, "followCount", 1),
                     ErrorCode.OPERATION_ERROR, "关注失败");
-            incrementCount(User::getId, targetId, "fansCount", 1);
+            CountUtils.increment(userService, User::getId, targetId, "fansCount", 1);
 
             if (isMutualFollow(loginId, targetId)) {
-                incrementCount(User::getId, loginId, "fansCount", 1);
+                CountUtils.increment(userService, User::getId, loginId, "fansCount", 1);
             }
             //推送消息
             eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
@@ -181,14 +179,14 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "取消关注失败");
 
             // 我的关注数 -1
-            ThrowUtils.throwIf(!incrementCount(User::getId, loginId, "followCount", -1),
+            ThrowUtils.throwIf(!CountUtils.increment(userService, User::getId, loginId, "followCount", -1),
                     ErrorCode.OPERATION_ERROR, "取消关注失败");
             // 对方粉丝数 -1
-            incrementCount(User::getId, targetId, "fansCount", -1);
+            CountUtils.increment(userService, User::getId, targetId, "fansCount", -1);
 
             // 互粉解除：若对方已关注我，则我的粉丝数也 -1
             if (isMutualFollow(loginId, targetId)) {
-                incrementCount(User::getId, loginId, "fansCount", -1);
+                CountUtils.increment(userService, User::getId, loginId, "fansCount", -1);
             }
             //推送消息
             eventPublisher.publishEvent(new FollowEvent(this,id,targetId));
@@ -217,22 +215,6 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
                 .eq(UserFollow::getFolloweeId, loginId)
                 .eq(UserFollow::getStatus, 1)
                 .exists();
-    }
-
-    /**
-     * 原子自增/自减用户计数（DB 层 SQL 自增减，避免并发读改写丢失）。
-     * 统一以内部 id 为准，杜绝内外 id 混用。
-     * @param idColumn 主键列（此处恒为 User::getId）
-     * @param idValue  内部主键值
-     * @param field    待增减的计数字段名（与数据库列一致）
-     * @param delta    增量（正数加、负数减）
-     * @return 是否更新成功
-     */
-    private boolean incrementCount(SFunction<User, ?> idColumn, Object idValue, String field, int delta) {
-        LambdaUpdateWrapper<User> uw = new LambdaUpdateWrapper<>();
-        uw.eq(idColumn, idValue)
-          .setSql(field + " = " + field + (delta >= 0 ? " + " : " - ") + Math.abs(delta));
-        return userService.update(uw);
     }
 
     /**

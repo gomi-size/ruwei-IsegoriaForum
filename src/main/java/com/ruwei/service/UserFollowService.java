@@ -32,6 +32,7 @@ public interface UserFollowService extends IService<UserFollow> {
      */
     void cancelFollowUser(Long id, Long userId);
 
+
     /**
      * 获取关注列表（分页，按关注时间倒序）
      * @return 关注用户的分页结果（UserVO）
@@ -44,4 +45,5 @@ public interface UserFollowService extends IService<UserFollow> {
      * @return 粉丝用户的分页结果（UserVO）
      */
     IPage<UserVO> getFansUserList(UserFollowOrFansPageDTO userFollowOrFansPageDTO);
+
 }

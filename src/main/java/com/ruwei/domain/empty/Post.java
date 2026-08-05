@@ -17,7 +17,7 @@ public class Post implements Serializable {
     /**
      * 
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**
@@ -71,7 +71,7 @@ public class Post implements Serializable {
     private Integer visibility;
 
     /**
-     * 生命周期状态: 1已发布 2草稿 3审核中 4下架 5删除
+     * 生命周期状态: 1已发布 2草稿 3审核中 4下架
      */
     private Integer status;
 
@@ -96,7 +96,7 @@ public class Post implements Serializable {
     private Integer viewCount;
 
     /**
-     * 分享数(热度公式×4)
+     * 分享数
      */
     private Integer shareCount;
 
@@ -146,40 +146,10 @@ public class Post implements Serializable {
     private Date updatedAt;
 
     /**
-     * 逻辑删除: 0未删 1已删(与board表@TableLogic对齐)
+     * 逻辑删除: 0未删 1已删
      */
     @TableLogic
     private Integer isDelete;
-
-    /**
-     * 待审标题(编辑送审时暂存新标题, 审核通过后覆盖正式字段; 先发后审期间旧内容继续对外展示)
-     */
-    @TableField(exist = false)
-    private String pendingTitle;
-
-    /**
-     * 待审正文
-     */
-    @TableField(exist = false)
-    private String pendingContent;
-
-    /**
-     * 待审封面URL
-     */
-    @TableField(exist = false)
-    private String pendingCover;
-
-    /**
-     * 待审图片URL列表(JSON数组)
-     */
-    @TableField(exist = false)
-    private String pendingImages;
-
-    /**
-     * 待审标签名列表(JSON数组)
-     */
-    @TableField(exist = false)
-    private String pendingTags;
 
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;
