@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruwei.mapper.PostMapper">
+
+    <resultMap id="BaseResultMap" type="com.ruwei.domain.empty.Post">
+            <id property="id" column="id" jdbcType="BIGINT"/>
+            <result property="postcode" column="postCode" jdbcType="VARCHAR"/>
+            <result property="userid" column="userId" jdbcType="BIGINT"/>
+            <result property="boardId" column="boardId" jdbcType="BIGINT"/>
+            <result property="title" column="title" jdbcType="VARCHAR"/>
+            <result property="content" column="content" jdbcType="VARCHAR"/>
+            <result property="cover" column="cover" jdbcType="VARCHAR"/>
+            <result property="type" column="type" jdbcType="TINYINT"/>
+            <result property="videoUrl" column="videoUrl" jdbcType="VARCHAR"/>
+            <result property="topic" column="topic" jdbcType="VARCHAR"/>
+            <result property="visibility" column="visibility" jdbcType="TINYINT"/>
+            <result property="status" column="status" jdbcType="TINYINT"/>
+            <result property="likeCount" column="likeCount" jdbcType="INTEGER"/>
+            <result property="commentCount" column="commentCount" jdbcType="INTEGER"/>
+            <result property="collectCount" column="collectCount" jdbcType="INTEGER"/>
+            <result property="viewcount" column="viewCount" jdbcType="INTEGER"/>
+            <result property="shareCount" column="shareCount" jdbcType="INTEGER"/>
+            <result property="score" column="score" jdbcType="DECIMAL"/>
+            <result property="isTop" column="isTop" jdbcType="TINYINT"/>
+            <result property="isEssence" column="isEssence" jdbcType="TINYINT"/>
+            <result property="auditStatus" column="auditStatus" jdbcType="TINYINT"/>
+            <result property="latitude" column="latitude" jdbcType="DECIMAL"/>
+            <result property="longitude" column="longitude" jdbcType="DECIMAL"/>
+            <result property="locationName" column="locationName" jdbcType="VARCHAR"/>
+            <result property="createdAt" column="createdAt" jdbcType="TIMESTAMP"/>
+            <result property="updatedAt" column="updatedAt" jdbcType="TIMESTAMP"/>
+            <result property="isDelete" column="isDelete" jdbcType="TINYINT"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,postCode,userId,boardId,title,content,
+        cover,type,videoUrl,topic,visibility,
+        status,likeCount,commentCount,collectCount,viewCount,
+        shareCount,score,isTop,isEssence,auditStatus,
+        latitude,longitude,locationName,createdAt,updatedAt,
+        isDelete
+    </sql>
+</mapper>

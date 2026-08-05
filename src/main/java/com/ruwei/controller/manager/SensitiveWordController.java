@@ -1,8 +1,6 @@
-package com.ruwei.controller;
+package com.ruwei.controller.manager;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
@@ -19,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**

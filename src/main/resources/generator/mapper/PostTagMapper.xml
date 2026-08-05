@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruwei.mapper.PostTagMapper">
+
+    <resultMap id="BaseResultMap" type="com.ruwei.domain.empty.PostTag">
+            <id property="id" column="id" jdbcType="BIGINT"/>
+            <result property="postId" column="postId" jdbcType="BIGINT"/>
+            <result property="tagId" column="tagId" jdbcType="BIGINT"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,postId,tagId
+    </sql>
+</mapper>
