@@ -1,10 +1,14 @@
 package com.ruwei.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.domain.dto.PostDTO;
+import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.vo.PostVO;
+
+import java.util.List;
 
 
 /**
@@ -34,7 +38,7 @@ public interface PostService extends IService<Post> {
      * @param dto 创建入参（title/content 必填，images/tags 可选）
      * @return 创建后的帖子 {@link PostVO}（含对外编码 postCode；visibility/status/auditStatus
      *         回显<b>中文文字</b>与入参同一套词汇，雪花 id 序列化为字符串防前端丢精度，
-     *         imageUrl 按 sort 回读、topic 解析为 tag id 列表）
+     *         imageUrl 按 sort 回读、topic 解析为 TagVO 列表）
      */
     PostVO createPost(PostDTO dto);
 
@@ -90,5 +94,44 @@ public interface PostService extends IService<Post> {
      *             false=驳回（status=4 下架 + auditStatus=3 驳回；正式字段已是新内容、无旧版可回退，
      *             故不能对外展示，作者修改后可重新提交审核）
      */
-    void auditPost(Long id, Boolean pass);
+    void auditPost(Long id, Boolean pass,String message);
+
+    /**
+     * 查看草稿箱：当前登录用户 status=草稿 的帖子列表（按创建时间倒序）。
+     *
+     * <p>草稿即 status=草稿（{@link com.ruwei.domain.Enum.PostStatusEnum#DRAFT}，code=2）的记录——
+     * 「编辑传 status=草稿」时后端复制原帖另存为新记录，不对外展示、不走审核；
+     * status=审核中（code=3）是送审流程中的帖子，不属于草稿。</p>
+     *
+     * <p>作者取当前登录态（不信任前端传 userId，防查他人草稿）；图片按草稿版本回读。</p>
+     *
+     * @return 草稿帖子列表（PostVO，枚举回文字、雪花 id 转字符串、imageUrl 按草稿版本回读）
+     */
+    List<PostVO> getDraftList();
+
+    /**
+     * 帖子分页查询（列表页）：可查自己的帖子、也可查别人的帖子。
+     *
+     * <p>条件：id / postCode / boardId / title / userId / createdAt（字符串字段模糊、id 类精确），
+     * 均不传则查询全部；未传排序字段时默认按创建时间倒序（最新在前）。</p>
+     *
+     * <p><b>可见性</b>：仅当 {@code userId} 条件等于当前登录用户（查自己）时放行全部状态
+     * （草稿/审核中/下架可见）；查询全部或他人帖子时只返回「已发布」（status=1）。</p>
+     *
+     * @param postQueryDTO 查询条件（含分页/排序参数）
+     * @return 帖子分页结果（PostVO，图片按各自状态版本回读）
+     */
+    IPage<PostVO> listPosts(PostQueryDTO postQueryDTO);
+
+    /**
+     * 管理员查看待审核的稿子（status=审核中，<b>不含草稿</b>/已发布/下架）。
+     *
+     * <p>条件与 {@link #listPosts(PostQueryDTO)} 一致：id / postCode / boardId / title / userId / createdAt
+     * （字符串字段模糊、id 类精确），均不传则查全部审核中稿子；未传排序字段时默认按创建时间倒序。
+     * 管理端不做可见性过滤（审核工作台就是要看未发布内容）。</p>
+     *
+     * @param postQueryDTO 查询条件（含分页/排序参数）
+     * @return 待审核稿子的分页结果（PostVO，图片按「审核中」版本回读）
+     */
+    IPage<PostVO> listReviewingPosts(PostQueryDTO postQueryDTO);
 }

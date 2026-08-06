@@ -79,9 +79,9 @@ public class PostVO implements Serializable {
     private List<String> imageUrl;
 
     /**
-     * 话题（tag 的 id 列表，由 post.topic 逗号串解析而来）
+     * 话题（tag 列表，由 post.topic 逗号串解析为 List&lt;TagVO&gt;，含 id+name）
      */
-    private List<Long> topic;
+    private List<TagVO> topic;
 
     /**
      * 可见性文字: 公开 / 仅粉丝可见 / 私密

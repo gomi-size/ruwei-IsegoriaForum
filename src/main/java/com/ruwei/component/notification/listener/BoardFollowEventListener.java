@@ -17,7 +17,10 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+
+import static java.time.format.DateTimeFormatter.ofPattern;
 
 /**
  * 监听 {@link BoardFollowEvent}：在板块关注事务提交后，生成通知落库（幂等），并实时推送给板块创建者（吧主）。
@@ -62,6 +65,7 @@ public class BoardFollowEventListener {
         // 幂等：同一 (actor, board) 每天只产生一条通知
         String todayStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String bizKey = "boardFollow:" + actorId + ":" + boardId + ":" + todayStr;
+        String time = LocalDateTime.now().format(ofPattern("yyyy-MM-dd HH:mm:ss"));
 
         // 关注者或板块可能已被删除/下架，防御性跳过
         User user = userService.getById(actorId);
@@ -70,7 +74,7 @@ public class BoardFollowEventListener {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR,"关注未成功，板块者可能已经被删除");
         }
 
-        String content = user.getNickname() + "关注了你的板块「" + board.getName() + "」";
+        String content = user.getNickname() + "在"+time+"关注了你的板块「" + board.getName() + "」";
 
         // type=4 关注；targetType=3 板块；targetId=板块内部 id（前端跳板块主页）
         SendNotificationDTO dto = new SendNotificationDTO();

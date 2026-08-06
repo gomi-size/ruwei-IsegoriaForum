@@ -13,7 +13,10 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+
+import static java.time.format.DateTimeFormatter.ofPattern;
 
 /**
  * 监听 FollowEvent：在关注事务提交后，生成通知落库（幂等），并实时推送给被关注者。
@@ -38,7 +41,8 @@ public class FollowUserEventListener {
         Long actorId = event.getActorId();      // 主动关注方（内部 id）
         Long followeeId = event.getFolloweeId(); // 被关注方（内部 id）
 
-        String todayStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String todayStr = LocalDate.now().format(ofPattern("yyyyMMdd"));
+        String time = LocalDateTime.now().format(ofPattern("yyyy-MM-dd HH:mm:ss"));
         // ① 幂等：同一 (actor, followee) 关注只产生一条通知（每天一次）
         String bizKey = "follow:" + actorId + ":" + followeeId + ":" + todayStr;
 
@@ -48,7 +52,7 @@ public class FollowUserEventListener {
             return;
         }
 
-        String content = user.getNickname() + "在" + todayStr + "时间，关注了你";
+        String content = user.getNickname() + "在" + time + "时间，关注了你";
 
         // type=4 关注；targetType=2 用户；targetId=被关注者内部 id（前端跳其主页）
         SendNotificationDTO dto = new SendNotificationDTO();

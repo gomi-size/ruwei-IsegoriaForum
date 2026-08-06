@@ -9,7 +9,7 @@ import lombok.Data;
 import java.io.Serializable;
 
 /**
- * 前端展示标签表
+ * 前端展示标签表类
  */
 
 @Data
@@ -22,6 +22,6 @@ public class TagVO implements Serializable {
      */
     private String name;
 
-    @TableField(exist = false)
+
     private static final long serialVersionUID = 1L;
 }

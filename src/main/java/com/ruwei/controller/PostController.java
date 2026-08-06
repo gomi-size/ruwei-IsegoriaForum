@@ -11,8 +11,12 @@ import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.service.PostService;
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.ruwei.domain.dto.PostQueryDTO;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 帖子（内容）相关接口
@@ -75,6 +79,32 @@ public class PostController {
     public BaseResponse<String> deletePost(@PathVariable Long id) {
         postService.deletePost(id);
         return ResultUtils.success("删除成功");
+    }
+
+    /**
+     * 查看草稿箱（当前登录用户 status=草稿 的帖子列表，按创建时间倒序）。
+     *
+     * <p>作者取当前登录态（不信任前端传 userId，防查他人草稿）；
+     * 草稿即 status=草稿（code=2）的记录——「编辑传 status=草稿」时后端复制原帖另存，
+     * 不走审核、不对外展示。审核中（code=3）的帖子属于送审流程，不算草稿。</p>
+     */
+    @GetMapping("/drafts")
+    public BaseResponse<List<PostVO>> getDraftList() {
+        return ResultUtils.success(postService.getDraftList());
+    }
+
+    /**
+     * （点进主页后的查询 / 帖子列表页）分页查询帖子：可查自己的稿子、也可查别人的稿子。
+     *
+     * <p>条件：id / postCode / boardId / title / userId / createdAt（字符串字段模糊匹配、id 类字段精确匹配），
+     * 均不传则查询全部；未传排序字段时默认按创建时间倒序（最新在前）。</p>
+     *
+     * <p><b>可见性</b>：仅当 userId 条件等于当前登录用户（查自己）时放行全部状态（草稿/审核中/下架可见）；
+     * 查询全部或他人帖子时只返回「已发布」，草稿/审核中/下架不可见。</p>
+     */
+    @PostMapping("/list")
+    public BaseResponse<IPage<PostVO>> listPosts(@RequestBody PostQueryDTO postQueryDTO) {
+        return ResultUtils.success(postService.listPosts(postQueryDTO));
     }
 
 }

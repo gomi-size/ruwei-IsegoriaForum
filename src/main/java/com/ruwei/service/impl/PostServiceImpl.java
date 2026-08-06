@@ -6,28 +6,38 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;
+import com.ruwei.component.notification.event.AdminEvent;
+import com.ruwei.component.notification.event.PostEvent;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
 import com.ruwei.domain.dto.PostDTO;
+import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.*;
 import com.ruwei.domain.utils.CountUtils;
+import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.PostVO;
+import com.ruwei.domain.vo.TagVO;
 import com.ruwei.mapper.PostMapper;
 import com.ruwei.service.BoardService;
 import com.ruwei.service.PostImageService;
 import com.ruwei.service.PostService;
 import com.ruwei.service.PostTagService;
 import com.ruwei.service.TagService;
+import com.ruwei.service.UserFollowService;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -35,6 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -87,6 +98,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private UserFollowService userFollowService;
+
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
+
     /**
      * 创建帖子（送审）。返回对外展示的 {@link PostVO}（枚举字段回显文字、雪花 id 转字符串）。
      */
@@ -109,6 +126,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             Board board = boardService.getById(dto.getBoardId());
             ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
         }
+        boolean exists = lambdaQuery().eq(Post::getTitle, dto.getTitle()).exists();
+        ThrowUtils.throwIf(exists,ErrorCode.PARAMS_ERROR,"标题存在高度相似请重新输入标题");
 
         // 3. 敏感词过滤（拦截即拒；替换词脱敏后存储）
         String title = scrub(dto.getTitle(), "标题");
@@ -163,6 +182,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
         //8.作者的作品数加一
         CountUtils.increment(userService, User::getId, loginId, "postCount", 1);
+
 
         // 9. 装配对外 VO：枚举字段回显文字、topic 解析为 id 列表、图片按 sort 回读
         return buildPostVO(post);
@@ -343,7 +363,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void auditPost(Long id, Boolean pass) {
+    public void auditPost(Long id, Boolean pass,String message) {
         ThrowUtils.throwIf(id == null || pass == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
         Post post = getById(id);
         ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
@@ -368,9 +388,88 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
         // 「审核中」版本的图片/标签整体迁移为最终状态，并清理该帖其它历史版本（标签同步回退 useCount）
         migrateReviewingRelations(id, finalStatus.getCode());
+        // 审核通过：通知该帖子作者的粉丝（发布推送）。
+        // 在事务内查粉丝列表并发布 PostEvent，由 PostEventListener 在 AFTER_COMMIT 后异步逐条发通知
+        if (pass) {
+            List<Long> fans = userFollowService.lambdaQuery()
+                    .eq(UserFollow::getFolloweeId, post.getUserId())
+                    .eq(UserFollow::getStatus, 1)
+                    .list().stream()
+                    .map(UserFollow::getFollowerId)
+                    .toList();
+            if (!fans.isEmpty()) {
+                eventPublisher.publishEvent(new PostEvent(this, post.getUserId(), id, fans));
+            }
+        }else{
+            eventPublisher.publishEvent(new AdminEvent(this, id, post.getUserId(), message));
+        }
+    }
 
-        // 注意：板块帖子数在 createPost 时已 +1（审核中/驳回也算帖子），此处不再累加。
-        // 否则「创建通过」会加两次，且每次编辑重新送审通过都会再 +1。
+    /**
+     * 查看草稿箱：当前登录用户 status=草稿 的帖子列表（按创建时间倒序）。
+     * 作者取登录态，不信任前端传 userId；图片按草稿版本回读。
+     */
+    @Override
+    public List<PostVO> getDraftList() {
+        long loginId = StpUtil.getLoginIdAsLong();
+        List<Post> drafts = lambdaQuery()
+                .eq(Post::getUserId, loginId)
+                .eq(Post::getStatus, PostStatusEnum.DRAFT.getCode())
+                .orderByDesc(Post::getCreatedAt)
+                .list();
+        return drafts.stream()
+                .map(this::buildPostVO)
+                .toList();
+    }
+
+    /**
+     * 帖子分页查询（可查自己/别人；查他人只展示已发布）。
+     */
+    @Override
+    public IPage<PostVO> listPosts(PostQueryDTO dto) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+
+        QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
+        // 可见性：仅当 userId 条件 == 当前登录用户（查自己）时放行全部状态；
+        // 查询全部或他人帖子时只返回「已发布」，避免泄露草稿/审核中/下架内容
+        boolean isSelf = dto.getUserId() != null && dto.getUserId() == loginId;
+        if (!isSelf) {
+            queryWrapper.eq("status", PostStatusEnum.PUBLISHED.getCode());
+        }
+
+        Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
+
+        // 逐条装配 VO（枚举回文字、雪花 id 转字符串、图片按各自状态版本回读）
+        List<PostVO> voList = page.getRecords().stream()
+                .map(this::buildPostVO)
+                .toList();
+        IPage<PostVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(voList);
+        return result;
+    }
+
+    /**
+     * 管理员查看待审核的稿子（status=审核中，不含草稿/已发布/下架）。
+     * 条件与用户列表一致（模糊/精确过滤），默认按创建时间倒序；管理端不做可见性过滤。
+     */
+    @Override
+    public IPage<PostVO> listReviewingPosts(PostQueryDTO dto) {
+        ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
+
+        QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
+        // 审核工作台：只看「审核中」的稿子（草稿已由 status 条件天然排除）
+        queryWrapper.eq("status", PostStatusEnum.REVIEWING.getCode());
+
+        Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
+
+        // 图片按「审核中」版本回读（loadImageUrls 使用 post.getStatus() 即 3）
+        List<PostVO> voList = page.getRecords().stream()
+                .map(this::buildPostVO)
+                .toList();
+        IPage<PostVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(voList);
+        return result;
     }
 
 
@@ -381,7 +480,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      *
      * <p>三个枚举字段（visibility / status / auditStatus）在实体里是整数、在 VO 里是文字，
      * 类型不一致，必须从 {@code copyProperties} 中排除后手工转换，否则 Hutool 会把
-     * 整数直接转成 "1"/"3" 这类无意义字符串；topic 由逗号串解析为 id 列表；
+     * 整数直接转成 "1"/"3" 这类无意义字符串；topic 由逗号串解析为 TagVO 列表；
      * imageUrl 从 post_image 表按<b>帖子当前状态</b>回读（版本化存储，见类头注释）。</p>
      *
      * @param post 帖子实体（null 返回 null）
@@ -393,7 +492,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }
         PostVO vo = BeanUtil.copyProperties(post, PostVO.class,
                 "topic", "visibility", "status", "auditStatus");
-        vo.setTopic(parseTopicIds(post.getTopic()));
+        vo.setTopic(parseTopicTags(post.getTopic()));
         vo.setVisibility(PostVisibilityEnum.textOfCode(post.getVisibility()));
         vo.setStatus(PostStatusEnum.textOfCode(post.getStatus()));
         vo.setAuditStatus(PostAuditStatusEnum.textOfCode(post.getAuditStatus()));
@@ -402,18 +501,43 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     }
 
     /**
-     * 解析 post.topic（逗号分隔的 tag id 串）为 id 列表。
-     * 非数字片段直接跳过，兼容历史上可能存过标签名称的脏数据。
+     * 解析 post.topic（逗号分隔的 tag id 串）为 {@link TagVO} 列表。
+     *
+     * <p>先拆出合法 Long id（非数字片段跳过，兼容历史脏数据），再批量查 tag 表装配 id+name，
+     * 并保持原串中的 id 顺序；已禁用/已删除的 tag 不出现在结果中。</p>
+     *
+     * @param topic 实体中的逗号分隔 tag id 串（可能为 null/空）
+     * @return 结构化标签列表（无则空列表，绝不返回 null）
      */
-    private List<Long> parseTopicIds(String topic) {
+    private List<TagVO> parseTopicTags(String topic) {
         if (StrUtil.isBlank(topic)) {
             return List.of();
         }
-        return StrUtil.split(topic, ',').stream()
+        List<Long> ids = StrUtil.split(topic, ',').stream()
                 .map(StrUtil::trim)
                 .filter(NumberUtil::isLong)
                 .map(Long::valueOf)
-                .collect(Collectors.toList());
+                .toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        // 批量查 tag 表（含已禁用的，避免历史帖子的标签被静默丢弃），按 id 建索引
+        List<Tag> tags = tagService.lambdaQuery()
+                .in(Tag::getId, ids)
+                .list();
+        Map<Long, Tag> tagMap = tags.stream()
+                .collect(Collectors.toMap(Tag::getId, t -> t, (a, b) -> a));
+        // 按原串 id 顺序装配 TagVO（跳过查不到的）
+        return ids.stream()
+                .map(tagMap::get)
+                .filter(Objects::nonNull)
+                .map(t -> {
+                    TagVO vo = new TagVO();
+                    vo.setId(t.getId());
+                    vo.setName(t.getName());
+                    return vo;
+                })
+                .toList();
     }
 
     /**

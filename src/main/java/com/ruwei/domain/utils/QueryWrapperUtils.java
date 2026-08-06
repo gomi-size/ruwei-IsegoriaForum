@@ -7,10 +7,12 @@ import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.domain.dto.BoardQueryDTO;
 import com.ruwei.domain.dto.NotificationQueryDTO;
+import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.dto.UserQueryDTO;
 import com.ruwei.domain.empty.Board;
 import com.ruwei.domain.empty.BoardFollow;
 import com.ruwei.domain.empty.Notification;
+import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
 
@@ -170,6 +172,15 @@ public class QueryWrapperUtils {
     );
 
     /**
+     * 允许参与排序的字段白名单（防止 orderBy 注入任意列名）。
+     * 与 post 表驼峰列名保持一致。
+     */
+    private static final Set<String> POST_ALLOWED_SORT_FIELDS = Set.of(
+            "id", "postCode", "boardId", "userId", "title", "createdAt", "updatedAt",
+            "likeCount", "commentCount", "collectCount", "viewCount", "shareCount", "score", "status"
+    );
+
+    /**
      * 根据查询条件构造板块表的 QueryWrapper。
      *
      * <p>模糊匹配：{@code name}；精确匹配：{@code slug} / {@code creatorId}；
@@ -245,6 +256,54 @@ public class QueryWrapperUtils {
         queryWrapper.in("boardId", boardIds)
                 .eq("status", 1)
                 .orderByDesc("createdAt");
+        return queryWrapper;
+    }
+
+    /**
+     * 根据查询条件构造帖子表的 QueryWrapper。
+     *
+     * <p>精确匹配：{@code id} / {@code boardId} / {@code userId}；模糊匹配：{@code postCode} / {@code title} /
+     * {@code createdAt}（datetime 列 LIKE，传 "2026-08-05" 可查当天）。均不传则查询全部。
+     * 排序走 {@link #POST_ALLOWED_SORT_FIELDS} 白名单；未传排序字段时默认按 {@code createdAt} 倒序（最新在前）。</p>
+     *
+     * <p><b>注意</b>：本方法不做可见性过滤（status），由调用方（PostService）根据
+     * 「是否查本人」决定是否追加 {@code status=已发布} 条件。</p>
+     *
+     * @param postQueryDTO 查询条件，为 null 时抛参数异常
+     * @return 已拼好条件的 QueryWrapper
+     */
+    public static QueryWrapper<Post> getPostQueryWrapper(PostQueryDTO postQueryDTO) {
+        if (postQueryDTO == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
+        }
+        Long id = postQueryDTO.getPostId();
+        String postCode = postQueryDTO.getPostCode();
+        Long boardId = postQueryDTO.getBoardId();
+        String title = postQueryDTO.getTitle();
+        Long userId = postQueryDTO.getUserId();
+        String createdAt = postQueryDTO.getCreatedAt();
+        String sortField = postQueryDTO.getSortField();
+        String sortOrder = postQueryDTO.getSortOrder();
+
+        QueryWrapper<Post> queryWrapper = new QueryWrapper<>();
+        // 精确匹配（列名与 post 表驼峰列一致）
+        queryWrapper.eq(ObjUtil.isNotNull(id)&&id!=0, "id", id);
+        queryWrapper.eq(ObjUtil.isNotNull(boardId)&&boardId!=0, "boardId", boardId);
+        queryWrapper.eq(ObjUtil.isNotNull(userId)&&userId!=0, "userId", userId);
+        // 模糊匹配
+        queryWrapper.like(StrUtil.isNotBlank(postCode), "postCode", postCode);
+        queryWrapper.like(StrUtil.isNotBlank(title), "title", title);
+        queryWrapper.like(StrUtil.isNotBlank(createdAt), "createdAt", createdAt);
+
+        // 排序：常量在前比较，避免 sortOrder 为 null 时空指针；列名走白名单防注入
+        boolean isAsc = "ascend".equals(sortOrder);
+        boolean canSort = StrUtil.isNotBlank(sortField) && POST_ALLOWED_SORT_FIELDS.contains(sortField);
+        if (canSort) {
+            queryWrapper.orderBy(true, isAsc, sortField);
+        } else {
+            // 默认按创建时间倒序（最新在前）
+            queryWrapper.orderByDesc("createdAt");
+        }
         return queryWrapper;
     }
 }

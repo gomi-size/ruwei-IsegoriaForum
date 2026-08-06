@@ -1,20 +1,23 @@
 package com.ruwei.controller;
 
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
+import com.ruwei.domain.dto.TagDTO;
 import com.ruwei.domain.empty.Tag;
+import com.ruwei.domain.vo.TagVO;
 import com.ruwei.service.TagService;
 import jakarta.annotation.Resource;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /**
- * 标签（话题）相关接口：热门标签榜等。
- * 公开接口（无需登录），与文档 02-content-module.md 5.3 TagController 对齐。
+ * 标签（话题）相关接口。
+ *
+ * <p>查询接口公开（无需登录）；增删改属平台管理行为，标注 {@code @SaCheckRole("admin")}，
+ * 如需放开为登录用户即可去掉该注解。</p>
  */
 @RestController
 @RequestMapping("/tag")
@@ -31,5 +34,48 @@ public class TagController {
         return ResultUtils.success(tagService.getHotTags(20));
     }
 
+    /**
+     * 标签列表（仅正常标签，按使用次数倒序）
+     */
+    @GetMapping("/list")
+    public BaseResponse<List<TagVO>> listTags() {
+        return ResultUtils.success(tagService.listTags());
+    }
 
+    /**
+     * 标签详情（按 id）
+     */
+    @GetMapping("/{id}")
+    public BaseResponse<TagVO> getTag(@PathVariable Long id) {
+        return ResultUtils.success(tagService.getTag(id));
+    }
+
+    /**
+     * 新增标签（name 唯一）
+     */
+    @SaCheckRole("admin")
+    @PostMapping("/add")
+    public BaseResponse<TagVO> addTag(@RequestBody TagDTO tagDTO) {
+        return ResultUtils.success(tagService.addTag(tagDTO));
+    }
+
+    /**
+     * 更新标签名（排除自身后校验唯一）
+     */
+    @SaCheckRole("admin")
+    @PostMapping("/update")
+    public BaseResponse<String> updateTag(@RequestParam Long id, @RequestBody TagDTO tagDTO) {
+        tagService.updateTag(id, tagDTO);
+        return ResultUtils.success("更新成功");
+    }
+
+    /**
+     * 删除标签（物理删除，并清理 post_tag 关联）
+     */
+    @SaCheckRole("admin")
+    @DeleteMapping("/{id}")
+    public BaseResponse<String> deleteTag(@PathVariable Long id) {
+        tagService.deleteTag(id);
+        return ResultUtils.success("删除成功");
+    }
 }
