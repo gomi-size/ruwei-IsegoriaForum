@@ -26,6 +26,7 @@ import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.*;
 import com.ruwei.domain.utils.CountUtils;
 import com.ruwei.domain.utils.QueryWrapperUtils;
+import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.domain.vo.TagVO;
 import com.ruwei.mapper.PostMapper;
@@ -424,29 +425,64 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     /**
      * 帖子分页查询（可查自己/别人；查他人只展示已发布）。
+     * 返回列表专用 VO（PostBrowseVO），作者信息批量装配避免 N+1。
      */
     @Override
-    public IPage<PostVO> listPosts(PostQueryDTO dto) {
+    public IPage<PostBrowseVO> listPosts(PostQueryDTO dto) {
         long loginId = StpUtil.getLoginIdAsLong();
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
 
         QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
         // 可见性：仅当 userId 条件 == 当前登录用户（查自己）时放行全部状态；
         // 查询全部或他人帖子时只返回「已发布」，避免泄露草稿/审核中/下架内容
-        boolean isSelf = dto.getUserId() != null && dto.getUserId() == loginId;
+        boolean isSelf = Objects.equals(dto.getUserId(), loginId);
         if (!isSelf) {
             queryWrapper.eq("status", PostStatusEnum.PUBLISHED.getCode());
         }
 
         Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
 
-        // 逐条装配 VO（枚举回文字、雪花 id 转字符串、图片按各自状态版本回读）
-        List<PostVO> voList = page.getRecords().stream()
-                .map(this::buildPostVO)
+        // 批量查作者（user 表），按内部 id 建索引；避免逐条查询造成 N+1
+        List<Long> authorIds = page.getRecords().stream()
+                .map(Post::getUserId)
+                .filter(Objects::nonNull)
+                .distinct()
                 .toList();
-        IPage<PostVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        Map<Long, User> userMap = authorIds.isEmpty() ? Map.of()
+                : userService.listByIds(authorIds).stream()
+                        .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
+
+        // 装配列表 VO（轻量字段，不含正文/图片全列表，点进详情走 getPostDetail）
+        List<PostBrowseVO> voList = page.getRecords().stream()
+                .map(post -> buildPostBrowseVO(post, userMap))
+                .toList();
+        IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
+    }
+
+    /**
+     * 帖子详情查询（点进帖子后展示完整内容）。
+     * 作者本人可看自己任意状态（草稿/审核中/下架）；非作者仅可看「已发布」，
+     * 其余状态一律按「帖子不存在」处理（与列表可见性规则一致，不泄露内容存在性）。
+     */
+    @Override
+    public PostVO getPostDetail(Long id) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        Post post = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+
+        long loginId = StpUtil.getLoginIdAsLong();
+        // 非作者只能看「已发布」：草稿/审核中/下架一律按「帖子不存在」处理，与列表可见性规则一致
+        boolean notVisible = !Objects.equals(post.getUserId(), loginId)
+                && !PostStatusEnum.PUBLISHED.matches(post.getStatus());
+        ThrowUtils.throwIf(notVisible, ErrorCode.NOT_FOUND_ERROR, "帖子不存在或未发布");
+        Long userId = post.getUserId();
+        User user = userService.getById(userId);
+        PostVO postVO = buildPostVO(post);
+        postVO.setUserNickname(user.getNickname());
+        postVO.setUserAvatar(user.getAvatar());
+        return postVO;
     }
 
     /**
@@ -497,6 +533,31 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         vo.setStatus(PostStatusEnum.textOfCode(post.getStatus()));
         vo.setAuditStatus(PostAuditStatusEnum.textOfCode(post.getAuditStatus()));
         vo.setImageUrl(loadImageUrls(post.getId(), post.getStatus()));
+        return vo;
+    }
+
+    /**
+     * 实体 → 列表 VO（PostBrowseVO）。
+     *
+     * <p>仅装配卡片渲染所需轻量字段；作者昵称/头像取自调用方批量查询的 {@code userMap}
+     * （查不到作者时置空，不抛错）。<b>不查 post_image</b>（列表只用 cover 封面）、
+     * <b>不解析 topic、不回显枚举文字</b> —— 正文、图片全列表、话题、可见性/状态等详情信息
+     * 由 {@code getPostDetail} 返回的 {@link PostVO} 提供。</p>
+     *
+     * @param post    帖子实体（null 返回 null）
+     * @param userMap 批量查询的作者索引（内部 id → User），可空
+     * @return 列表 VO
+     */
+    private PostBrowseVO buildPostBrowseVO(Post post, Map<Long, User> userMap) {
+        if (post == null) {
+            return null;
+        }
+        PostBrowseVO vo = BeanUtil.copyProperties(post, PostBrowseVO.class);
+        User author = userMap == null ? null : userMap.get(post.getUserId());
+        if (author != null) {
+            vo.setUserNickname(author.getNickname());
+            vo.setUserAvatar(author.getAvatar());
+        }
         return vo;
     }
 

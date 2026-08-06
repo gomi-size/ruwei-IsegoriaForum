@@ -199,16 +199,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     @Override
     public void editUserInfo(UserEditDTO userEditDTO) {
         ThrowUtils.throwIf(BeanUtil.isEmpty(userEditDTO)||userEditDTO.getId()==null,ErrorCode.PARAMS_ERROR,"参数不能为空");
-        long userId = StpUtil.getLoginIdAsLong();
-        if (userId!=userEditDTO.getId()&&!isAdmin()){
+        long id = StpUtil.getLoginIdAsLong();
+        if (id !=userEditDTO.getId()&&!isAdmin()){
             ThrowUtils.throwIf(true,ErrorCode.NO_AUTH_ERROR,"无权限,只有本人或者管理员");
         }
-       ThrowUtils.throwIf(getById(userId)==null,ErrorCode.NOT_FOUND_ERROR,"无当前用户");
+       ThrowUtils.throwIf(getById(id)==null,ErrorCode.NOT_FOUND_ERROR,"无当前用户");
 
         // 昵称：长度4-12个字符；不传/为空则不校验也不更新；不允许纯空白
-        ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getNickname()) && !userEditDTO.getNickname().matches("^(?!\\s+$).{4,12}$"),
-                ErrorCode.PARAMS_ERROR, "昵称长度应在4-12个字符之间且不能为纯空白");
-
+        if(!getById(id).getNickname().equals(userEditDTO.getNickname())){
+            ThrowUtils.throwIf(StrUtil.isNotBlank(userEditDTO.getNickname()) && !userEditDTO.getNickname().matches("^(?!\\s+$).{4,12}$"),
+                    ErrorCode.PARAMS_ERROR, "昵称长度应在4-12个字符之间且不能为纯空白");
+        }
         // 生日：格式 yyyy-MM-dd（如 1990-05-20）；不传则不校验
         ThrowUtils.throwIf(userEditDTO.getBirthday() != null && !userEditDTO.getBirthday().toString().matches("^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])$"),
                 ErrorCode.PARAMS_ERROR, "生日格式不正确，应为yyyy-MM-dd");
@@ -301,12 +302,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     /**
      * 当前登录用户获取别人的详情详情（需登录）
-     * <p>入参为对外编码 userId，便于前端在他人主页直接调用；内部关注关系统一按内部 id 计算。</p>
-     * @param userId 对方的对外编码
+     * <p>入参兼容<b>对外编码 userId 与内部主键 id</b>：先按对外编码查询（他人主页常用入口），
+     * 查不到时再按内部主键查询（帖子/关注列表等场景前端拿到的作者 id 是内部雪花 id）。
+     * 两种 id 数值域不重叠（内部 id 约 19 位、对外编码 10 万起步），不会误匹配。
+     * 均查不到时抛「用户不存在」，避免底层 copyProperties 返回 null 后 setter 触发 NPE。</p>
+     * @param userId 对方对外编码或内部主键
      */
     @Override
     public UserVO getOtherUserVOInfo(Long userId) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR, "请传入对方 userId 或内部 id");
         User otherUser = lambdaQuery().eq(User::getUserId, userId).one();
+        if (BeanUtil.isEmpty(otherUser)) {
+            // 兼容内部 id 传参（帖子作者/关注列表里的内部雪花 id）
+            otherUser = getById(userId);
+        }
+        ThrowUtils.throwIf(BeanUtil.isEmpty(otherUser), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         return buildOtherUserVO(otherUser);
     }
 
@@ -328,6 +338,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      * @return 他人视图 VO
      */
     private UserVO buildOtherUserVO(User otherUser) {
+        // 防御：查不到用户（不存在/已删除）时直接抛「用户不存在」，避免后续 copyProperties 返回 null 后 setter 触发 NPE
+        ThrowUtils.throwIf(BeanUtil.isEmpty(otherUser), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         long loginId = StpUtil.getLoginIdAsLong();
         UserVO userVO = BeanUtil.copyProperties(otherUser, UserVO.class);
         userVO.setPhone("***");

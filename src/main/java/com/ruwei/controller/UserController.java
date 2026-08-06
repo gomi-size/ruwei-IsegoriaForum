@@ -111,6 +111,8 @@ public class UserController {
 
     /**
      * 当前登录用户获取别人的详情详情（需登录）
+     * <p>入参兼容<b>对外编码 userId 与内部主键 id</b>：他人主页可传对外编码；
+     * 帖子作者/关注列表等场景前端拿到的是内部雪花 id，同样可直接传入。</p>
      */
     @SaCheckLogin
     @GetMapping("/otherUserInfo")

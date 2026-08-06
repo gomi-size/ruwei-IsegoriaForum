@@ -8,6 +8,7 @@ import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.dto.PostDTO;
+import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.service.PostService;
 import cn.hutool.core.util.StrUtil;
@@ -29,7 +30,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/post")
-@SaCheckLogin
+
 public class PostController {
 
     @Resource
@@ -42,6 +43,7 @@ public class PostController {
      * （与入参同一套词汇），id / userId / boardId 序列化为字符串（雪花 id 防前端丢精度）。</p>
      */
     @PostMapping("/add")
+    @SaCheckLogin
     public BaseResponse<PostVO> createPost(@RequestBody PostDTO postDTO) {
         PostVO postVO = postService.createPost(postDTO);
         return ResultUtils.success(postVO);
@@ -51,6 +53,7 @@ public class PostController {
      * 编辑帖子（先审后发：草稿另存为新记录直接生效；其余直接覆盖正式字段并重新送审，审核期间不对外展示）
      */
     @PostMapping("/update")
+    @SaCheckLogin
     public BaseResponse<String> updatePost(@RequestBody PostDTO postDTO) {
 
         return postService.updatePost(postDTO);
@@ -66,6 +69,7 @@ public class PostController {
      * 后两者由创建送审、编辑送审、管理员审核三条流程单向推进，不开放给作者手动指定。</p>
      */
     @PostMapping("/visibility")
+    @SaCheckLogin
     public BaseResponse<String> updatePostVisibility(@RequestParam Long id, @RequestParam String visibility) {
         ThrowUtils.throwIf(id == null || StrUtil.isBlank(visibility), ErrorCode.PARAMS_ERROR, "参数不能为空");
         postService.updatePostVisibility(id, visibility);
@@ -76,6 +80,7 @@ public class PostController {
      * 删除帖子（逻辑删除 isDelete=1，作者或管理员）
      */
     @DeleteMapping("/{id}")
+    @SaCheckLogin
     public BaseResponse<String> deletePost(@PathVariable Long id) {
         postService.deletePost(id);
         return ResultUtils.success("删除成功");
@@ -89,6 +94,7 @@ public class PostController {
      * 不走审核、不对外展示。审核中（code=3）的帖子属于送审流程，不算草稿。</p>
      */
     @GetMapping("/drafts")
+    @SaCheckLogin
     public BaseResponse<List<PostVO>> getDraftList() {
         return ResultUtils.success(postService.getDraftList());
     }
@@ -101,10 +107,30 @@ public class PostController {
      *
      * <p><b>可见性</b>：仅当 userId 条件等于当前登录用户（查自己）时放行全部状态（草稿/审核中/下架可见）；
      * 查询全部或他人帖子时只返回「已发布」，草稿/审核中/下架不可见。</p>
+     *
+     * <p><b>返回列表专用 VO（{@link PostBrowseVO}）</b>：仅含卡片渲染所需轻量字段
+     * （标题 / 封面 / 作者昵称头像 / 计数 / 时间），不含正文与图片全列表 ——
+     * 用户点击进入帖子后，由 {@code GET /post/{id}} 详情接口返回完整 {@link PostVO}。</p>
      */
     @PostMapping("/list")
-    public BaseResponse<IPage<PostVO>> listPosts(@RequestBody PostQueryDTO postQueryDTO) {
+    public BaseResponse<IPage<PostBrowseVO>> listPosts(@RequestBody PostQueryDTO postQueryDTO) {
         return ResultUtils.success(postService.listPosts(postQueryDTO));
+    }
+
+    /**
+     * 帖子详情（点进帖子后展示完整内容）。
+     *
+     * <p>返回完整 {@link PostVO}：正文 content、图片全列表 imageUrl、话题 topic、
+     * 可见性/状态/审核结果回显文字，雪花 id 序列化为字符串防前端丢精度。</p>
+     *
+     * <p><b>可见性</b>：与 {@code /list} 规则一致 —— 作者本人可看自己任意状态
+     * （草稿/审核中/下架）；非作者仅可看「已发布」，其余状态一律返回「帖子不存在或未发布」，
+     * 不泄露内容存在性。</p>
+     */
+    @GetMapping("/{id}")
+    public BaseResponse<PostVO> getPostDetail(@PathVariable Long id) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        return ResultUtils.success(postService.getPostDetail(id));
     }
 
 }

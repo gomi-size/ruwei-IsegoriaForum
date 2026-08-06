@@ -6,6 +6,7 @@ import com.ruwei.common.BaseResponse;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.Post;
+import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
 
 import java.util.List;
@@ -118,10 +119,27 @@ public interface PostService extends IService<Post> {
      * <p><b>可见性</b>：仅当 {@code userId} 条件等于当前登录用户（查自己）时放行全部状态
      * （草稿/审核中/下架可见）；查询全部或他人帖子时只返回「已发布」（status=1）。</p>
      *
+     * <p><b>返回列表专用 VO（{@link PostBrowseVO}）</b>：仅含卡片渲染所需轻量字段
+     * （标题/封面/作者昵称头像/计数/时间等），<b>不含正文与图片全列表</b>；
+     * 作者信息由本方法批量查 user 表装配，避免逐条查询造成 N+1。</p>
+     *
      * @param postQueryDTO 查询条件（含分页/排序参数）
-     * @return 帖子分页结果（PostVO，图片按各自状态版本回读）
+     * @return 帖子分页结果（PostBrowseVO，列表轻量展示；点击进入详情请用 {@link #getPostDetail(Long)}）
      */
-    IPage<PostVO> listPosts(PostQueryDTO postQueryDTO);
+    IPage<PostBrowseVO> listPosts(PostQueryDTO postQueryDTO);
+
+    /**
+     * 帖子详情查询（点进帖子后展示完整内容）。
+     *
+     * <p><b>可见性</b>：与 {@link #listPosts(PostQueryDTO)} 的列表规则保持一致 ——
+     * 作者本人可查看自己任意状态（草稿/审核中/下架）的帖子；非作者只能查看「已发布」（status=1）的帖子，
+     * 其余状态一律视为「帖子不存在」，不泄露内容存在性。</p>
+     *
+     * @param id 帖子内部主键
+     * @return 帖子完整详情 {@link PostVO}（正文 content、图片全列表 imageUrl、话题 topic、
+     *         可见性/状态/审核结果回显文字，雪花 id 序列化为字符串）
+     */
+    PostVO getPostDetail(Long id);
 
     /**
      * 管理员查看待审核的稿子（status=审核中，<b>不含草稿</b>/已发布/下架）。

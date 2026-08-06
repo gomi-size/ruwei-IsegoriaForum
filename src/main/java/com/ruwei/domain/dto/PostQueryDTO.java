@@ -12,7 +12,11 @@ import java.io.Serializable;
  *
  * <p>用于帖子列表页：可查自己的帖子、也可查别人的帖子；
  * 字符串字段（postCode / title / createdAt）模糊匹配，id 类字段（id / boardId / userId）精确匹配；
+ * <b>visibility / status 传中文文字经枚举转整数精确匹配，为空则查询所有</b>；
  * 均不传则查询全部，默认按创建时间倒序（最新在前）。分页/排序参数继承自 {@link PageRequest}。</p>
+ *
+ * <p><b>visibility / status 一般只在「我的主页」场景传递</b>（配合查询条件 userId=自己，
+ * 此时列表放行全部状态）；查询他人或全部时由后端强制只返回「已发布」，不受这两个字段影响。</p>
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -50,4 +54,18 @@ public class PostQueryDTO extends PageRequest implements Serializable {
      * 创建时间（模糊匹配，datetime 列 LIKE 匹配，传 "2026-08-05" 可查当天）
      */
     private String createdAt;
+
+    //前端传递，只在自己主页的时候传递
+    /**
+     * 可见性文字: 公开 / 仅粉丝可见 / 私密
+     * （对应 {@code PostVisibilityEnum}）
+     */
+    private String visibility;
+
+    /**
+     * 生命周期状态文字: 已发布 / 草稿 / 审核中 / 下架
+     * （对应 {@code PostStatusEnum}）
+     */
+    private String status;
+
 }

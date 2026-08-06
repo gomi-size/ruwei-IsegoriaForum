@@ -5,6 +5,8 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
+import com.ruwei.domain.Enum.PostStatusEnum;
+import com.ruwei.domain.Enum.PostVisibilityEnum;
 import com.ruwei.domain.dto.BoardQueryDTO;
 import com.ruwei.domain.dto.NotificationQueryDTO;
 import com.ruwei.domain.dto.PostQueryDTO;
@@ -263,11 +265,15 @@ public class QueryWrapperUtils {
      * 根据查询条件构造帖子表的 QueryWrapper。
      *
      * <p>精确匹配：{@code id} / {@code boardId} / {@code userId}；模糊匹配：{@code postCode} / {@code title} /
-     * {@code createdAt}（datetime 列 LIKE，传 "2026-08-05" 可查当天）。均不传则查询全部。
+     * {@code createdAt}（datetime 列 LIKE，传 "2026-08-05" 可查当天）。
+     * <b>可见性/状态过滤</b>：{@code visibility}（公开/仅粉丝可见/私密）与 {@code status}
+     * （已发布/草稿/审核中/下架）传<b>中文文字</b>，经对应枚举转整数后精确匹配；<b>为空则查询所有</b>，
+     * 非法文字抛参数错误。其余条件均不传则查询全部。
      * 排序走 {@link #POST_ALLOWED_SORT_FIELDS} 白名单；未传排序字段时默认按 {@code createdAt} 倒序（最新在前）。</p>
      *
-     * <p><b>注意</b>：本方法不做可见性过滤（status），由调用方（PostService）根据
-     * 「是否查本人」决定是否追加 {@code status=已发布} 条件。</p>
+     * <p><b>注意</b>：本方法只按入参条件过滤，不做「默认可见性」兜底（status=已发布 的追加由
+     * 调用方 PostService 根据「是否查本人」决定）；status 条件与调用方追加条件为 AND 叠加
+     * （如查他人时传 status=审核中 会与已发布条件互斥返回空，符合可见性语义）。</p>
      *
      * @param postQueryDTO 查询条件，为 null 时抛参数异常
      * @return 已拼好条件的 QueryWrapper
@@ -282,6 +288,8 @@ public class QueryWrapperUtils {
         String title = postQueryDTO.getTitle();
         Long userId = postQueryDTO.getUserId();
         String createdAt = postQueryDTO.getCreatedAt();
+        String visibilityText = postQueryDTO.getVisibility();
+        String statusText = postQueryDTO.getStatus();
         String sortField = postQueryDTO.getSortField();
         String sortOrder = postQueryDTO.getSortOrder();
 
@@ -294,6 +302,22 @@ public class QueryWrapperUtils {
         queryWrapper.like(StrUtil.isNotBlank(postCode), "postCode", postCode);
         queryWrapper.like(StrUtil.isNotBlank(title), "title", title);
         queryWrapper.like(StrUtil.isNotBlank(createdAt), "createdAt", createdAt);
+
+        // 可见性 / 生命周期状态：中文文字 → 枚举转整数精确匹配；为空则查询所有
+        if (StrUtil.isNotBlank(visibilityText)) {
+            Integer visibilityCode = PostVisibilityEnum.codeOfText(visibilityText);
+            if (visibilityCode == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "非法的可见性：" + visibilityText);
+            }
+            queryWrapper.eq("visibility", visibilityCode);
+        }
+        if (StrUtil.isNotBlank(statusText)) {
+            Integer statusCode = PostStatusEnum.codeOfText(statusText);
+            if (statusCode == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "非法的状态：" + statusText);
+            }
+            queryWrapper.eq("status", statusCode);
+        }
 
         // 排序：常量在前比较，避免 sortOrder 为 null 时空指针；列名走白名单防注入
         boolean isAsc = "ascend".equals(sortOrder);
