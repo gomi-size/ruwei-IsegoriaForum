@@ -49,6 +49,16 @@ public class PostVO implements Serializable {
     private Long boardId;
 
     /**
+     * 作者昵称（来自 user 表 nickname）
+     */
+    private String userNickname;
+
+    /**
+     * 作者头像 URL（来自 user 表 avatar）
+     */
+    private String userAvatar;
+
+    /**
      * 标题
      */
     private String title;
@@ -125,12 +135,6 @@ public class PostVO implements Serializable {
      * 分享数(热度公式×4)
      */
     private Integer shareCount;
-
-    /**
-     * 热度分
-     */
-    private BigDecimal score;
-
     /**
      * 置顶(重排强插第1/2位)
      */
