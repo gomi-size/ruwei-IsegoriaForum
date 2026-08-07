@@ -1,5 +1,6 @@
 package com.ruwei.domain.utils;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -20,6 +21,7 @@ import com.ruwei.domain.empty.UserFollow;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 public class QueryWrapperUtils {
@@ -304,7 +306,18 @@ public class QueryWrapperUtils {
         queryWrapper.like(StrUtil.isNotBlank(createdAt), "createdAt", createdAt);
 
         // 可见性 / 生命周期状态：中文文字 → 枚举转整数精确匹配；为空则查询所有
-        if (StrUtil.isNotBlank(visibilityText)) {
+        // visibilityList 非空时优先按 IN 匹配（如「公开 或 仅粉丝可见」），忽略单值 visibility
+        List<String> visibilityList = postQueryDTO.getVisibilityList();
+        if (CollUtil.isNotEmpty(visibilityList)) {
+            List<Integer> visibilityCodes = visibilityList.stream()
+                    .map(PostVisibilityEnum::codeOfText)
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (visibilityCodes.isEmpty()) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "非法的可见性列表：" + visibilityList);
+            }
+            queryWrapper.in("visibility", visibilityCodes);
+        } else if (StrUtil.isNotBlank(visibilityText)) {
             Integer visibilityCode = PostVisibilityEnum.codeOfText(visibilityText);
             if (visibilityCode == null) {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "非法的可见性：" + visibilityText);

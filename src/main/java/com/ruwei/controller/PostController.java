@@ -2,7 +2,7 @@ package com.ruwei.controller;
 
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
-import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaIgnore;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
@@ -30,7 +30,6 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/post")
-
 public class PostController {
 
     @Resource
@@ -113,6 +112,7 @@ public class PostController {
      * 用户点击进入帖子后，由 {@code GET /post/{id}} 详情接口返回完整 {@link PostVO}。</p>
      */
     @PostMapping("/list")
+    @SaIgnore
     public BaseResponse<IPage<PostBrowseVO>> listPosts(@RequestBody PostQueryDTO postQueryDTO) {
         return ResultUtils.success(postService.listPosts(postQueryDTO));
     }
@@ -128,6 +128,7 @@ public class PostController {
      * 不泄露内容存在性。</p>
      */
     @GetMapping("/{id}")
+    @SaIgnore
     public BaseResponse<PostVO> getPostDetail(@PathVariable Long id) {
         ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
         return ResultUtils.success(postService.getPostDetail(id));

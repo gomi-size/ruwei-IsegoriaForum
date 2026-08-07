@@ -2,6 +2,7 @@ package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaIgnore;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
@@ -18,7 +19,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/boards")
-@SaCheckLogin
+
 public class BoardController {
 
     @Resource
@@ -28,6 +29,7 @@ public class BoardController {
      * 创建板块（创建者为吧主）
      */
     @PostMapping("/add")
+    @SaCheckLogin
     public BaseResponse<Board> createBoard(@RequestBody CreateBoardDTO createBoardDTO) {
         Board board = boardService.createBoard(createBoardDTO);
         return ResultUtils.success(board);
@@ -37,6 +39,7 @@ public class BoardController {
      * 编辑板块信息（吧主/管理员）
      */
     @PostMapping("/update")
+    @SaCheckLogin
     public BaseResponse<String> updateBoard(@RequestBody BoardUpdateDTO boardUpdateDTO) {
         boardService.updateBoard(boardUpdateDTO);
         return ResultUtils.success("修改成功");
@@ -45,7 +48,11 @@ public class BoardController {
     /**
      * 分页获取板块列表（支持按名称模糊搜索，按关注数倒序）
      * 入参 BoardQueryDTO
+     *
+     * <p>列表查询<b>公开</b>（未登录也可浏览首页板块导航）：用 {@code @SaIgnore} 覆盖类级
+     * {@code @SaCheckLogin}。创建/编辑/删除等写操作仍受类级登录校验保护。</p>
      */
+    @SaIgnore
     @PostMapping("/list")
     public BaseResponse<IPage<Board>> listBoards(@RequestBody BoardQueryDTO queryDTO) {
         return ResultUtils.success(boardService.listBoards(queryDTO));
@@ -55,6 +62,7 @@ public class BoardController {
      * 吧主删除自己创建的板块（逻辑删除：isDelete=1，数据保留可恢复）
      */
     @DeleteMapping("/{id}")
+    @SaCheckLogin
     public BaseResponse<String> deleteBoardByCreator(@PathVariable Long id) {
         boardService.deleteBoardByCreator(id);
         return ResultUtils.success("删除成功");

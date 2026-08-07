@@ -340,32 +340,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     private UserVO buildOtherUserVO(User otherUser) {
         // 防御：查不到用户（不存在/已删除）时直接抛「用户不存在」，避免后续 copyProperties 返回 null 后 setter 触发 NPE
         ThrowUtils.throwIf(BeanUtil.isEmpty(otherUser), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
-        long loginId = StpUtil.getLoginIdAsLong();
+        boolean login = StpUtil.isLogin();
         UserVO userVO = BeanUtil.copyProperties(otherUser, UserVO.class);
         userVO.setPhone("***");
         userVO.setEmail("***");
+        if(login){
+            long loginId = StpUtil.getLoginIdAsLong();
+            long otherId = otherUser.getId();
 
-        long otherId = otherUser.getId();
+            // 我是否关注了他
+            LambdaQueryWrapper<UserFollow> iFollowHimWrapper = new LambdaQueryWrapper<>();
+            iFollowHimWrapper.eq(UserFollow::getFollowerId, loginId)
+                    .eq(UserFollow::getFolloweeId, otherId)
+                    .eq(UserFollow::getStatus, 1);
+            boolean isFollowed = userFollowMapper.exists(iFollowHimWrapper);
+            userVO.setIsFollowed(isFollowed);
 
-        // 我是否关注了他
-        LambdaQueryWrapper<UserFollow> iFollowHimWrapper = new LambdaQueryWrapper<>();
-        iFollowHimWrapper.eq(UserFollow::getFollowerId, loginId)
-                .eq(UserFollow::getFolloweeId, otherId)
-                .eq(UserFollow::getStatus, 1);
-        boolean isFollowed = userFollowMapper.exists(iFollowHimWrapper);
-        userVO.setIsFollowed(isFollowed);
+            // 他是否是我的粉丝（即他关注了我）
+            LambdaQueryWrapper<UserFollow> heFollowMeWrapper = new LambdaQueryWrapper<>();
+            heFollowMeWrapper.eq(UserFollow::getFollowerId, otherId)
+                    .eq(UserFollow::getFolloweeId, loginId)
+                    .eq(UserFollow::getStatus, 1);
+            boolean isFans = userFollowMapper.exists(heFollowMeWrapper);
+            userVO.setIsFans(isFans);
 
-        // 他是否是我的粉丝（即他关注了我）
-        LambdaQueryWrapper<UserFollow> heFollowMeWrapper = new LambdaQueryWrapper<>();
-        heFollowMeWrapper.eq(UserFollow::getFollowerId, otherId)
-                .eq(UserFollow::getFolloweeId, loginId)
-                .eq(UserFollow::getStatus, 1);
-        boolean isFans = userFollowMapper.exists(heFollowMeWrapper);
-        userVO.setIsFans(isFans);
-
-        // 互相关注 = 我关注他 且 他关注我
-        userVO.setIsMutual(isFollowed && isFans);
-
+            // 互相关注 = 我关注他 且 他关注我
+            userVO.setIsMutual(isFollowed && isFans);
+        }
         return userVO;
     }
 

@@ -6,6 +6,7 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * 帖子分页查询条件（入参 DTO）。
@@ -61,6 +62,13 @@ public class PostQueryDTO extends PageRequest implements Serializable {
      * （对应 {@code PostVisibilityEnum}）
      */
     private String visibility;
+
+    /**
+     * 可见性文字列表（多选 IN 查询）：用于「公开 或 仅粉丝可见」这类场景，
+     * 例如关注流只展示 公开 / 仅粉丝可见 且已发布的稿件。
+     * 与 {@link #visibility} 互斥：本字段非空时优先按列表 IN 匹配，忽略单值 {@code visibility}。
+     */
+    private List<String> visibilityList;
 
     /**
      * 生命周期状态文字: 已发布 / 草稿 / 审核中 / 下架

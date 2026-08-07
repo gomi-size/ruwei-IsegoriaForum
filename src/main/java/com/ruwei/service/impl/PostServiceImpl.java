@@ -120,7 +120,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         ThrowUtils.throwIf(StrUtil.isBlank(dto.getTitle()), ErrorCode.PARAMS_ERROR, "标题不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(dto.getContent()), ErrorCode.PARAMS_ERROR, "内容不能为空");
         ThrowUtils.throwIf(dto.getTitle().length() > 200, ErrorCode.PARAMS_ERROR, "标题最多200字");
-        ThrowUtils.throwIf(dto.getContent().length() > 1500, ErrorCode.PARAMS_ERROR, "内容最多1500字");
+        ThrowUtils.throwIf(dto.getContent().length() > 10000000, ErrorCode.PARAMS_ERROR, "内容最多10000000字");
 
         // 2. 板块存在性校验（boardId 非空时）
         if (dto.getBoardId() != null) {
@@ -429,13 +429,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      */
     @Override
     public IPage<PostBrowseVO> listPosts(PostQueryDTO dto) {
-        long loginId = StpUtil.getLoginIdAsLong();
+        // 这里用 isLogin 守卫，未登录视为 null，isSelf 自然为 false，只返回「已发布」内容
+        Long loginId = StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
-
         QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
-        // 可见性：仅当 userId 条件 == 当前登录用户（查自己）时放行全部状态；
-        // 查询全部或他人帖子时只返回「已发布」，避免泄露草稿/审核中/下架内容
-        boolean isSelf = Objects.equals(dto.getUserId(), loginId);
+
+        boolean isSelf = dto.getUserId() != null && Objects.equals(dto.getUserId(), loginId);
         if (!isSelf) {
             queryWrapper.eq("status", PostStatusEnum.PUBLISHED.getCode());
         }
@@ -472,7 +471,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         Post post = getById(id);
         ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
 
-        long loginId = StpUtil.getLoginIdAsLong();
+        // 公开接口（@SaIgnore）：游客未登录时按 null 处理，非作者仅可看「已发布」，与列表规则一致
+        Long loginId = StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
         // 非作者只能看「已发布」：草稿/审核中/下架一律按「帖子不存在」处理，与列表可见性规则一致
         boolean notVisible = !Objects.equals(post.getUserId(), loginId)
                 && !PostStatusEnum.PUBLISHED.matches(post.getStatus());

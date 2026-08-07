@@ -3,6 +3,7 @@ package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaIgnore;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -98,9 +99,8 @@ public class UserController {
     }
 
     /**
-     * 当前登录用户获取自己详情（需登录）
+     * 当前登录用户获取自己详情
      */
-    @SaCheckLogin
     @GetMapping("/userInfo")
     public BaseResponse<UserVO> getUserVOInfo(){
         // @SaCheckLogin 已保证登录态
@@ -110,12 +110,12 @@ public class UserController {
     }
 
     /**
-     * 当前登录用户获取别人的详情详情（需登录）
+     * 当前登录用户获取别人的详情详情
      * <p>入参兼容<b>对外编码 userId 与内部主键 id</b>：他人主页可传对外编码；
      * 帖子作者/关注列表等场景前端拿到的是内部雪花 id，同样可直接传入。</p>
      */
-    @SaCheckLogin
     @GetMapping("/otherUserInfo")
+    @SaIgnore
     public BaseResponse<UserVO> getOtherUserVOInfo(Long userId){
         UserVO userVO =userService.getOtherUserVOInfo(userId);
         return ResultUtils.success(userVO);
