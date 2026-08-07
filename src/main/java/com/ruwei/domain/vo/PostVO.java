@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 import java.util.Date;
 import java.util.List;
 
+import com.ruwei.domain.dto.ContentBlock;
+
 /**
  * 帖子对外展示 VO（创建 / 详情 / 列表复用）。
  *
@@ -87,6 +89,13 @@ public class PostVO implements Serializable {
      * 图片地址集合（来自 post_image 表，按 sort 升序）
      */
     private List<String> imageUrl;
+
+    /**
+     * 结构化内容块（图文混排）：由 {@code post.content} 解析（新数据）或
+     * 由「纯文本 + imageUrl 图集」合成（旧数据兼容）。<b>前端优先消费此字段</b>，
+     * 为空时回退 {@link #content} / {@link #imageUrl}。
+     */
+    private List<ContentBlock> contentBlocks;
 
     /**
      * 话题（tag 列表，由 post.topic 逗号串解析为 List&lt;TagVO&gt;，含 id+name）

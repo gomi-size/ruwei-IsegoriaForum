@@ -5,6 +5,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -22,6 +23,7 @@ import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
 import com.ruwei.domain.dto.PostDTO;
+import com.ruwei.domain.dto.ContentBlock;
 import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.*;
 import com.ruwei.domain.utils.CountUtils;
@@ -118,9 +120,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         // 1. 参数校验
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(dto.getTitle()), ErrorCode.PARAMS_ERROR, "标题不能为空");
-        ThrowUtils.throwIf(StrUtil.isBlank(dto.getContent()), ErrorCode.PARAMS_ERROR, "内容不能为空");
         ThrowUtils.throwIf(dto.getTitle().length() > 200, ErrorCode.PARAMS_ERROR, "标题最多200字");
-        ThrowUtils.throwIf(dto.getContent().length() > 10000000, ErrorCode.PARAMS_ERROR, "内容最多10000000字");
+        // 内容非空校验：纯文本 content 非空 或 blocks 中存在文本块
+        boolean hasBlockText = dto.getContentBlocks() != null
+                && dto.getContentBlocks().stream().anyMatch(b -> StrUtil.isNotBlank(b.getText()));
+        ThrowUtils.throwIf(StrUtil.isBlank(dto.getContent()) && !hasBlockText,
+                ErrorCode.PARAMS_ERROR, "内容不能为空");
+        if (StrUtil.isNotBlank(dto.getContent())) {
+            ThrowUtils.throwIf(dto.getContent().length() > 10000000, ErrorCode.PARAMS_ERROR, "内容最多10000000字");
+        }
 
         // 2. 板块存在性校验（boardId 非空时）
         if (dto.getBoardId() != null) {
@@ -130,9 +138,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         boolean exists = lambdaQuery().eq(Post::getTitle, dto.getTitle()).exists();
         ThrowUtils.throwIf(exists,ErrorCode.PARAMS_ERROR,"标题存在高度相似请重新输入标题");
 
-        // 3. 敏感词过滤（拦截即拒；替换词脱敏后存储）
+        // 3. 敏感词过滤（拦截即拒；替换词脱敏后存储）。content 由 blocks 序列化或纯文本兜底
         String title = scrub(dto.getTitle(), "标题");
-        String content = scrub(dto.getContent(), "正文");
+        String content = resolveContent(dto);
 
         // 3.5 话题/标签：前端传 tag id 列表 → 查 tag 表（仅 status=1 未被禁用）→ 名称逗号分隔存 post.topic
         List<Tag> tags = resolveTags(dto.getTopicList());
@@ -170,8 +178,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         boolean saved = save(post);
         ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "发布失败");
 
-        // 5. 图片全量写入（post_image，来自 dto.imageUrl）——与帖子同为「审核中」版本
-        saveImages(post.getId(), dto.getImageUrl(), PostStatusEnum.REVIEWING.getCode());
+        // 5. 图片：新数据（contentBlocks）已内联进 content，不写 post_image；
+        //    旧客户端（仅传 imageUrl）仍按原逻辑写 post_image，向后兼容
+        if (dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty()) {
+            saveImages(post.getId(), dto.getImageUrl(), PostStatusEnum.REVIEWING.getCode());
+        }
 
         // 6. 标签关联（useCount+1 + post_tag）——同上，标记为「审核中」版本
         bindTags(post.getId(), tags, PostStatusEnum.REVIEWING.getCode());
@@ -208,9 +219,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
         ThrowUtils.throwIf(!Objects.equals(post.getUserId(), loginId), ErrorCode.NO_AUTH_ERROR, "只能编辑自己的帖子");
 
-        // 敏感词过滤（编辑的内容同样拦截/脱敏）
+        // 敏感词过滤（编辑的内容同样拦截/脱敏）；blocks 优先，纯文本兜底（无内容变更返回 null）
         String title = StrUtil.isBlank(dto.getTitle()) ? null : scrub(dto.getTitle(), "标题");
-        String content = StrUtil.isBlank(dto.getContent()) ? null : scrub(dto.getContent(), "正文");
+        String content = resolveContent(dto);
 
         // 内容字数限制（最多1500字）
         if (StrUtil.isNotBlank(dto.getContent())) {
@@ -230,6 +241,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             update.setUserId(loginId);
             update.setIsTop(0);
             update.setTopic(topic != null ? topic : post.getTopic());
+            // 内容：blocks 序列化为 JSON 或纯文本兜底；未变更时沿用原帖内容
+            update.setContent(content != null ? content : post.getContent());
             // 可见性：前端传文字 → 枚举转整数；仅在本次传入时覆盖，否则沿用原帖
             if (StrUtil.isNotBlank(dto.getVisibility())) {
                 Integer vc = PostVisibilityEnum.codeOfText(dto.getVisibility());
@@ -248,7 +261,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
             // 图片/标签按「新草稿自身的 id + 自身状态」写入；
             // 注意必须用 update.getId()（新草稿），用 post.getId() 会把原帖的图片/标签删掉
-            if (dto.getImageUrl() != null) {
+            // 旧客户端（仅传 imageUrl）仍写 post_image；新数据图片已内联进 content
+            if ((dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty())
+                    && dto.getImageUrl() != null) {
                 rebuildImages(update.getId(), dto.getImageUrl(), update.getStatus());
             }
             if (topicTags != null) {
@@ -278,10 +293,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         boolean updated = update(uw);
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "编辑失败");
 
-        // 图片 / 标签写入「审核中」版本：只替换该状态下的记录，
-        // 已发布版本的图片/标签原样保留，审核通过时再由 migrateReviewingRelations 整体顶替
-        if (dto.getImageUrl() != null) {
-            rebuildImages(post.getId(), dto.getImageUrl(), PostStatusEnum.REVIEWING.getCode());
+        // 图片 / 标签写入「审核中」版本：仅旧客户端（仅传 imageUrl）写 post_image；
+        // 新数据（contentBlocks）图片已内联进 content，无需写 post_image
+        if (dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty()) {
+            if (dto.getImageUrl() != null) {
+                rebuildImages(post.getId(), dto.getImageUrl(), PostStatusEnum.REVIEWING.getCode());
+            }
         }
         if (topicTags != null) {
             rebuildTags(post.getId(), topicTags, PostStatusEnum.REVIEWING.getCode());
@@ -435,10 +452,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
 
         boolean isSelf = dto.getUserId() != null && Objects.equals(dto.getUserId(), loginId);
-        if (!isSelf) {
-            queryWrapper.eq("status", PostStatusEnum.PUBLISHED.getCode());
-        }
-
+        queryWrapper.eq("status", PostStatusEnum.PUBLISHED.getCode());
         Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
 
         // 批量查作者（user 表），按内部 id 建索引；避免逐条查询造成 N+1
@@ -473,9 +487,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
         // 公开接口（@SaIgnore）：游客未登录时按 null 处理，非作者仅可看「已发布」，与列表规则一致
         Long loginId = StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null;
-        // 非作者只能看「已发布」：草稿/审核中/下架一律按「帖子不存在」处理，与列表可见性规则一致
+        // 非作者和非管理员只能看「已发布」：草稿/审核中/下架一律按「帖子不存在」处理，与列表可见性规则一致
         boolean notVisible = !Objects.equals(post.getUserId(), loginId)
-                && !PostStatusEnum.PUBLISHED.matches(post.getStatus());
+                && !PostStatusEnum.PUBLISHED.matches(post.getStatus())&&!userService.isAdmin();
         ThrowUtils.throwIf(notVisible, ErrorCode.NOT_FOUND_ERROR, "帖子不存在或未发布");
         Long userId = post.getUserId();
         User user = userService.getById(userId);
@@ -486,20 +500,79 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     }
 
     /**
-     * 管理员查看待审核的稿子（status=审核中，不含草稿/已发布/下架）。
-     * 条件与用户列表一致（模糊/精确过滤），默认按创建时间倒序；管理端不做可见性过滤。
+     * 关注流：我关注的人的帖子（仅已发布 + 审核通过 + 公开/仅粉丝可见）。
+     *
+     * <p>两步查询：① user_follow 查我关注的人（followerId=登录用户、status=1，取 followeeId 内部 id）；
+     * ② post 表 in(userId=关注者) + 状态/审核/可见性过滤，按创建时间倒序。作者信息批量装配。</p>
+     */
+    @Override
+    public IPage<PostBrowseVO> listFollowPosts(long current, long pageSize) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(current < 1 || pageSize < 1, ErrorCode.PARAMS_ERROR, "分页参数不合法");
+
+        // 1. 我关注的人（user_follow 统一存内部 id，与关注模块约定一致）
+        List<Long> followeeIds = userFollowService.lambdaQuery()
+                .eq(UserFollow::getFollowerId, loginId)
+                .eq(UserFollow::getStatus, 1)
+                .list().stream()
+                .map(UserFollow::getFolloweeId)
+                .filter(Objects::nonNull)
+                .toList();
+        // 未关注任何人 → 直接返回空页
+        if (followeeIds.isEmpty()) {
+            IPage<PostBrowseVO> empty = new Page<>(current, pageSize);
+            empty.setRecords(List.of());
+            return empty;
+        }
+
+        // 2. 关注者的帖子：已发布 + 审核通过 + 可见性∈{公开, 仅粉丝可见}，最新在前
+        Page<Post> page = lambdaQuery()
+                .in(Post::getUserId, followeeIds)
+                .eq(Post::getStatus, PostStatusEnum.PUBLISHED.getCode())
+                .eq(Post::getAuditStatus, PostAuditStatusEnum.APPROVED.getCode())
+                .in(Post::getVisibility,
+                        PostVisibilityEnum.PUBLIC.getCode(), PostVisibilityEnum.FANS_ONLY.getCode())
+                .orderByDesc(Post::getCreatedAt)
+                .page(new Page<>(current, pageSize));
+
+        // 3. 批量查作者 + 装配列表 VO（与 listPosts 相同模式，避免 N+1）
+        List<Long> authorIds = page.getRecords().stream()
+                .map(Post::getUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, User> userMap = authorIds.isEmpty() ? Map.of()
+                : userService.listByIds(authorIds).stream()
+                        .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
+        List<PostBrowseVO> voList = page.getRecords().stream()
+                .map(post -> buildPostBrowseVO(post, userMap))
+                .toList();
+        IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(voList);
+        return result;
+    }
+
+    /**
+     * 管理后台帖子列表（统一入口：待审/已发布/草稿/下架 四个筛选都走这里）。
+     * <p>status 由 {@code PostQueryDTO} 传入（中文文字→枚举码精确匹配）：
+     * <ul>
+     *   <li><b>status 为空</b> → 默认只看「审核中」（审核工作台语义）；</li>
+     *   <li><b>status 非空</b> → 按传入状态筛选（已发布/草稿/下架等，管理员全状态可查）。</li>
+     * </ul>
+     * 条件与用户列表一致（模糊/精确过滤），默认按创建时间倒序；管理端不做可见性过滤。</p>
      */
     @Override
     public IPage<PostVO> listReviewingPosts(PostQueryDTO dto) {
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
 
         QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
-        // 审核工作台：只看「审核中」的稿子（草稿已由 status 条件天然排除）
-        queryWrapper.eq("status", PostStatusEnum.REVIEWING.getCode());
-
+        // 未传 status 时兜底为「审核中」；传了 status 则由 getPostQueryWrapper 精确匹配（不要覆盖）
+        if (StrUtil.isBlank(dto.getStatus())) {
+            queryWrapper.eq("status", PostStatusEnum.REVIEWING.getCode());
+        }
         Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
 
-        // 图片按「审核中」版本回读（loadImageUrls 使用 post.getStatus() 即 3）
+        // 图片按帖子当前状态版本回读（loadImageUrls 使用 post.getStatus()）
         List<PostVO> voList = page.getRecords().stream()
                 .map(this::buildPostVO)
                 .toList();
@@ -526,14 +599,60 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         if (post == null) {
             return null;
         }
+        Long userId = post.getUserId();
+        User user = userService.getById(userId);
+
         PostVO vo = BeanUtil.copyProperties(post, PostVO.class,
                 "topic", "visibility", "status", "auditStatus");
         vo.setTopic(parseTopicTags(post.getTopic()));
         vo.setVisibility(PostVisibilityEnum.textOfCode(post.getVisibility()));
         vo.setStatus(PostStatusEnum.textOfCode(post.getStatus()));
         vo.setAuditStatus(PostAuditStatusEnum.textOfCode(post.getAuditStatus()));
-        vo.setImageUrl(loadImageUrls(post.getId(), post.getStatus()));
+        List<String> imageUrls = loadImageUrls(post.getId(), post.getStatus());
+        vo.setImageUrl(imageUrls);
+        vo.setContentBlocks(buildContentBlocks(post, imageUrls));
+        vo.setUserNickname(user.getNickname());
         return vo;
+    }
+
+    /**
+     * 装配结构化内容块（图文混排）。
+     *
+     * <p>新数据：{@code post.content} 为 ContentBlock 的 JSON 数组，直接解析；
+     * 旧数据：{@code post.content} 为纯文本 + {@code imageUrls} 图集，合成等价 blocks
+     * （一个 p 块 + 多个 image 块），保证前端统一消费 contentBlocks 即可正确渲染。</p>
+     *
+     * @param post      帖子实体
+     * @param imageUrls 已回读的本版本图片 URL（旧数据图集，新数据为空）
+     * @return 内容块列表（无则空列表，绝不返回 null）
+     */
+    private List<ContentBlock> buildContentBlocks(Post post, List<String> imageUrls) {
+        String content = post.getContent();
+        // 新数据：content 是以 '[' 开头的 JSON 数组，尝试解析为 blocks
+        if (StrUtil.isNotBlank(content) && content.trim().startsWith("[")) {
+            try {
+                return JSONUtil.toList(JSONUtil.parseArray(content), ContentBlock.class);
+            } catch (Exception ignored) {
+                // 解析失败（脏数据），fallback 到下方纯文本合成
+            }
+        }
+        // 旧数据兼容：纯文本 → 单个 p 块；imageUrls 图集 → image 块
+        List<ContentBlock> blocks = new ArrayList<>();
+        if (StrUtil.isNotBlank(content)) {
+            ContentBlock p = new ContentBlock();
+            p.setType("p");
+            p.setText(content);
+            blocks.add(p);
+        }
+        if (imageUrls != null) {
+            for (String url : imageUrls) {
+                ContentBlock img = new ContentBlock();
+                img.setType("image");
+                img.setUrl(url);
+                blocks.add(img);
+            }
+        }
+        return blocks;
     }
 
     /**
@@ -618,6 +737,34 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .list().stream()
                 .map(PostImage::getUrl)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 解析并脱敏正文：blocks 优先（序列化为 JSON，文本块逐块脱敏），无 blocks 时退回纯文本。
+     * 既无 blocks 又无纯文本时返回 null（编辑场景下表示「不更新正文」）。
+     */
+    private String resolveContent(PostDTO dto) {
+        List<ContentBlock> blocks = dto.getContentBlocks();
+        if (blocks != null && !blocks.isEmpty()) {
+            List<ContentBlock> cleaned = new ArrayList<>();
+            for (ContentBlock b : blocks) {
+                ContentBlock c = new ContentBlock();
+                c.setType(b.getType());
+                c.setUrl(b.getUrl());
+                c.setW(b.getW());
+                c.setH(b.getH());
+                c.setAlt(b.getAlt());
+                if (StrUtil.isNotBlank(b.getText())) {
+                    c.setText(scrub(b.getText(), "正文"));
+                }
+                cleaned.add(c);
+            }
+            return JSONUtil.toJsonStr(cleaned);
+        }
+        if (StrUtil.isBlank(dto.getContent())) {
+            return null;
+        }
+        return scrub(dto.getContent(), "正文");
     }
 
     /**

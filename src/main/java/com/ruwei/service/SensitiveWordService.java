@@ -1,7 +1,7 @@
 package com.ruwei.service;
 
 import com.ruwei.domain.dto.SensitiveWordAddDTO;
-import com.ruwei.domain.empty.SensitiveWord;
+import com.ruwei.domain.vo.SensitiveWordVO;
 import java.util.List;
 
 /**
@@ -27,7 +27,7 @@ public interface SensitiveWordService {
      * @param dtos 敏感词入参列表，每项可单独指定 category / action
      * @return 成功写入的条数（已跳过空/空白项）
      */
-    int addBatch(Object body);
+    int addBatch(List<SensitiveWordAddDTO> dtos);
 
     /**
      * 根据主键删除敏感词。
@@ -38,9 +38,9 @@ public interface SensitiveWordService {
     boolean deleteWord(Long id);
 
     /**
-     * 查询全部敏感词列表（按数据库全量返回）。
+     * 查询全部敏感词列表（按数据库全量返回，转为 VO 不下发实体）。
      *
-     * @return 敏感词实体列表
+     * @return 敏感词 VO 列表
      */
-    List<SensitiveWord> listAll();
+    List<SensitiveWordVO> listAll();
 }

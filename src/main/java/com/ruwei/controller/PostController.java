@@ -3,10 +3,7 @@ package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaIgnore;
-import com.ruwei.common.BaseResponse;
-import com.ruwei.common.ErrorCode;
-import com.ruwei.common.ResultUtils;
-import com.ruwei.common.ThrowUtils;
+import com.ruwei.common.*;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
@@ -30,6 +27,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/post")
+@SaCheckLogin
 public class PostController {
 
     @Resource
@@ -42,7 +40,6 @@ public class PostController {
      * （与入参同一套词汇），id / userId / boardId 序列化为字符串（雪花 id 防前端丢精度）。</p>
      */
     @PostMapping("/add")
-    @SaCheckLogin
     public BaseResponse<PostVO> createPost(@RequestBody PostDTO postDTO) {
         PostVO postVO = postService.createPost(postDTO);
         return ResultUtils.success(postVO);
@@ -52,7 +49,6 @@ public class PostController {
      * 编辑帖子（先审后发：草稿另存为新记录直接生效；其余直接覆盖正式字段并重新送审，审核期间不对外展示）
      */
     @PostMapping("/update")
-    @SaCheckLogin
     public BaseResponse<String> updatePost(@RequestBody PostDTO postDTO) {
 
         return postService.updatePost(postDTO);
@@ -68,7 +64,6 @@ public class PostController {
      * 后两者由创建送审、编辑送审、管理员审核三条流程单向推进，不开放给作者手动指定。</p>
      */
     @PostMapping("/visibility")
-    @SaCheckLogin
     public BaseResponse<String> updatePostVisibility(@RequestParam Long id, @RequestParam String visibility) {
         ThrowUtils.throwIf(id == null || StrUtil.isBlank(visibility), ErrorCode.PARAMS_ERROR, "参数不能为空");
         postService.updatePostVisibility(id, visibility);
@@ -79,7 +74,6 @@ public class PostController {
      * 删除帖子（逻辑删除 isDelete=1，作者或管理员）
      */
     @DeleteMapping("/{id}")
-    @SaCheckLogin
     public BaseResponse<String> deletePost(@PathVariable Long id) {
         postService.deletePost(id);
         return ResultUtils.success("删除成功");
@@ -93,7 +87,6 @@ public class PostController {
      * 不走审核、不对外展示。审核中（code=3）的帖子属于送审流程，不算草稿。</p>
      */
     @GetMapping("/drafts")
-    @SaCheckLogin
     public BaseResponse<List<PostVO>> getDraftList() {
         return ResultUtils.success(postService.getDraftList());
     }
@@ -117,6 +110,8 @@ public class PostController {
         return ResultUtils.success(postService.listPosts(postQueryDTO));
     }
 
+
+
     /**
      * 帖子详情（点进帖子后展示完整内容）。
      *
@@ -133,5 +128,19 @@ public class PostController {
         ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
         return ResultUtils.success(postService.getPostDetail(id));
     }
+
+    /**
+     * 关注流：我关注的人的帖子列表（需登录，什么都不用传，内部组装）。
+     *
+     * <p>先查我关注的人（user_follow 关注中），再查这些人的帖子，过滤：
+     * <b>已发布 + 审核通过 + 可见性∈{公开, 仅粉丝可见}</b>，按创建时间倒序。
+     * 返回列表专用 {@link PostBrowseVO}（标题/封面/作者昵称头像/计数/时间）。</p>
+     *
+     */
+    @PostMapping("/followFist")
+    public BaseResponse<IPage<PostBrowseVO>> listFollowPosts(@RequestBody PageRequest pageRequest) {
+        return ResultUtils.success(postService.listFollowPosts(pageRequest.getCurrent(), pageRequest.getPageSize()));
+    }
+
 
 }

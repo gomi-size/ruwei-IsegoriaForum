@@ -1,13 +1,13 @@
 package com.ruwei.service.impl;
 
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import cn.hutool.core.bean.BeanUtil;
 import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
-import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.dto.SensitiveWordAddDTO;
 import com.ruwei.domain.empty.SensitiveWord;
+import com.ruwei.domain.vo.SensitiveWordVO;
 import com.ruwei.mapper.SensitiveWordMapper;
 import com.ruwei.service.SensitiveWordService;
 import jakarta.annotation.Resource;
@@ -22,8 +22,6 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
 
     @Resource
     private SensitiveWordFilter sensitiveWordFilter;
-    @Resource
-    private ObjectMapper objectMapper;
 
     /**
      * 新增单个敏感词。
@@ -60,13 +58,11 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
      * 若批次内或库中已存在重复 word（命中唯一约束），整体抛出
      * {@code PARAMS_ERROR: 存在重复或已存在的敏感词}。</p>
      *
-     * @param body 敏感词入参列表，每项可单独指定 category / action
+     * @param dtos 敏感词入参列表，每项可单独指定 category / action
      * @return 成功写入的条数（已跳过空/空白项）
      */
     @Override
-    public int addBatch(Object body) {
-        List<SensitiveWordAddDTO> dtos = toList(body);
-        ThrowUtils.throwIf(dtos.isEmpty(), ErrorCode.PARAMS_ERROR, "敏感词列表不能为空");
+    public int addBatch(List<SensitiveWordAddDTO> dtos) {
         if (dtos == null || dtos.isEmpty()) {
             return 0;
         }
@@ -111,32 +107,14 @@ public class SensitiveWordServiceImpl extends ServiceImpl<SensitiveWordMapper, S
     }
 
     /**
-     * 把请求体（单个对象或数组）统一转换为 {@link SensitiveWordAddDTO} 列表，
-     * 用于兼容 {@code POST /admin/sensitive-words} 同时接收单条与批量两种传参形态。
+     * 查询全部敏感词列表（按数据库全量返回，复制为 VO 不下发实体）。
      *
-     * @param body 单个 DTO 对象或 DTO 对象数组
-     * @return 转换后的 DTO 列表（已忽略数组中的 null 元素）
-     */
-    private List<SensitiveWordAddDTO> toList(Object body) {
-        List<SensitiveWordAddDTO> dtos = new ArrayList<>();
-        if (body instanceof List<?> raw) {
-            for (Object o : raw) {
-                if (o != null) {
-                    dtos.add(objectMapper.convertValue(o, SensitiveWordAddDTO.class));
-                }
-            }
-        } else {
-            dtos.add(objectMapper.convertValue(body, SensitiveWordAddDTO.class));
-        }
-        return dtos;
-    }
-    /**
-     * 查询全部敏感词列表。
-     *
-     * @return 敏感词实体列表
+     * @return 敏感词 VO 列表
      */
     @Override
-    public List<SensitiveWord> listAll() {
-        return list();
+    public List<SensitiveWordVO> listAll() {
+        return list().stream()
+                .map(sw -> BeanUtil.copyProperties(sw, SensitiveWordVO.class))
+                .toList();
     }
 }

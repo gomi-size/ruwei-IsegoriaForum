@@ -1,7 +1,9 @@
 package com.ruwei.controller;
 
 
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaIgnore;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.dto.TagDTO;
@@ -21,6 +23,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/tag")
+@SaCheckLogin
 public class TagController {
 
     @Resource
@@ -30,6 +33,7 @@ public class TagController {
      * 热门标签榜（按使用次数倒序，取前 20）
      */
     @GetMapping("/hot")
+    @SaIgnore
     public BaseResponse<List<Tag>> getHotTags() {
         return ResultUtils.success(tagService.getHotTags(20));
     }
@@ -43,6 +47,15 @@ public class TagController {
     }
 
     /**
+     * 标签全量列表（含禁用，按使用次数倒序）—— 管理后台标签管理专用
+     */
+    @SaCheckRole("admin")
+    @GetMapping("/adminList")
+    public BaseResponse<List<TagVO>> listTagsAll() {
+        return ResultUtils.success(tagService.listTagsAll());
+    }
+
+    /**
      * 标签详情（按 id）
      */
     @GetMapping("/{id}")
@@ -53,7 +66,7 @@ public class TagController {
     /**
      * 新增标签（name 唯一）
      */
-    @SaCheckRole("admin")
+    @SaCheckLogin
     @PostMapping("/add")
     public BaseResponse<TagVO> addTag(@RequestBody TagDTO tagDTO) {
         return ResultUtils.success(tagService.addTag(tagDTO));

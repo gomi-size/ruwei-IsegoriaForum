@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
+import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.dto.TagDTO;
 import com.ruwei.domain.empty.PostTag;
 import com.ruwei.domain.empty.Tag;
@@ -28,6 +29,10 @@ import java.util.List;
 @Service
 public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
     implements TagService{
+
+
+    @Resource
+    private SensitiveWordFilter sensitiveWordFilter;
 
     @Resource
     private PostTagService postTagService;
@@ -57,7 +62,7 @@ public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
         // name 唯一（ukName 兜底，先查做友好提示）
         Long exists = lambdaQuery().eq(Tag::getName, name).count();
         ThrowUtils.throwIf(exists != null && exists > 0, ErrorCode.OPERATION_ERROR, "标签已存在");
-
+        sensitiveWordFilter.checkStrict(dto.getName(), "话题");
         Tag tag = new Tag();
         tag.setName(name);
         tag.setUseCount(0);
@@ -122,6 +127,19 @@ public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
     public List<TagVO> listTags() {
         return lambdaQuery()
                 .eq(Tag::getStatus, 1)
+                .orderByDesc(Tag::getUseCount)
+                .list().stream()
+                .map(t -> BeanUtil.copyProperties(t, TagVO.class))
+                .toList();
+    }
+
+    /**
+     * 标签全量列表（含 status=2 禁用，按使用次数倒序）。
+     * 管理后台标签管理专用，返回 useCount / status 供列表与统计展示。
+     */
+    @Override
+    public List<TagVO> listTagsAll() {
+        return lambdaQuery()
                 .orderByDesc(Tag::getUseCount)
                 .list().stream()
                 .map(t -> BeanUtil.copyProperties(t, TagVO.class))

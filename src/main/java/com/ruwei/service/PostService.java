@@ -142,6 +142,25 @@ public interface PostService extends IService<Post> {
     PostVO getPostDetail(Long id);
 
     /**
+     * 关注流：我关注的人的帖子列表（需登录）。
+     *
+     * <p><b>两步查询</b>：① 先查我关注的人 —— {@code user_follow} 表中
+     * {@code followerId = 当前登录用户内部 id} 且 {@code status = 1}（关注中），取被关注者内部 id 列表；
+     * ② 再查这些人的帖子，过滤条件：<b>已发布（status=1）+ 审核通过（auditStatus=2）
+     * + 可见性∈{公开, 仅粉丝可见}（visibility∈{1,2}）</b>，按创建时间倒序（最新在前）。</p>
+     *
+     * <p><b>粉丝可见语义说明</b>：严格语义下「仅粉丝可见」帖子应只有作者粉丝（互关）可见，
+     * 当前按入参约定直接放行 {@code FANS_ONLY}（列表源本身是我关注的人）；若需互关校验可在后续迭代补充。</p>
+     *
+     * <p>返回列表专用 VO（{@link PostBrowseVO}），作者信息批量装配避免 N+1。</p>
+     *
+     * @param current  页码（从 1 开始）
+     * @param pageSize 每页条数
+     * @return 关注流分页结果（PostBrowseVO）
+     */
+    IPage<PostBrowseVO> listFollowPosts(long current, long pageSize);
+
+    /**
      * 管理员查看待审核的稿子（status=审核中，<b>不含草稿</b>/已发布/下架）。
      *
      * <p>条件与 {@link #listPosts(PostQueryDTO)} 一致：id / postCode / boardId / title / userId / createdAt

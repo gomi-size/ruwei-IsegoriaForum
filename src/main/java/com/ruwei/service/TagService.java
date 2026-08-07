@@ -60,4 +60,12 @@ public interface TagService extends IService<Tag> {
      * @return 标签 VO 列表
      */
     List<TagVO> listTags();
+
+    /**
+     * 标签全量列表（含 status=2 禁用，按使用次数倒序）。
+     * 仅供管理后台标签管理使用（普通发帖话题选择请用 {@link #listTags()}）。
+     *
+     * @return 标签 VO 列表（含 useCount / status 字段）
+     */
+    List<TagVO> listTagsAll();
 }

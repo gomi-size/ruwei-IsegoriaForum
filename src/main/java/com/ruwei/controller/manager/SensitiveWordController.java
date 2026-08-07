@@ -6,7 +6,7 @@ import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.dto.SensitiveWordAddDTO;
-import com.ruwei.domain.empty.SensitiveWord;
+import com.ruwei.domain.vo.SensitiveWordVO;
 import com.ruwei.service.SensitiveWordService;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -41,27 +41,26 @@ public class SensitiveWordController {
 /**
  * 获取全部敏感词列表。
  *
- * @return 敏感词实体列表
+ * @return 敏感词 VO 列表
  */
 @GetMapping
-public BaseResponse<List<SensitiveWord>> list() {
+public BaseResponse<List<SensitiveWordVO>> list() {
     return ResultUtils.success(sensitiveWordService.listAll());
 }
 
 /**
- * 新增敏感词。请求体既可以是单个对象，也可以是对象数组（批量一次性传多组）。
+ * 批量新增敏感词（一次传多组，前端统一传数组）。
  * <pre>
- * 单个：  {"word":"代开发票","category":2,"action":2}
- * 批量：  [{"word":"代开发票","action":2},{"word":"傻子","action":1}]
+ * 批量：  [{"word":"代开发票","category":2,"action":2},{"word":"傻子","action":1}]
  * </pre>
- * 内部统一转换为 {@link SensitiveWordAddDTO} 列表后调用批量写入。
+ * category / action 缺省时由 {@link SensitiveWordAddDTO} 默认值兜底（分类 1、动作 1）。
  *
- * @param body 单个对象或对象数组
+ * @param dtos 敏感词入参列表
  * @return 成功写入的条数
  */
 @PostMapping
-public BaseResponse<Integer> add(@RequestBody Object body) {
-    int count = sensitiveWordService.addBatch(body);
+public BaseResponse<Integer> add(@RequestBody List<SensitiveWordAddDTO> dtos) {
+    int count = sensitiveWordService.addBatch(dtos);
     ThrowUtils.throwIf(count == 0, ErrorCode.PARAMS_ERROR, "没有有效的敏感词");
     return ResultUtils.success(count);
 }

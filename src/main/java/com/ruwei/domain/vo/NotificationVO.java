@@ -32,12 +32,12 @@ public class NotificationVO implements Serializable {
     private SenderVO sender;
 
     /**
-     * 1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏
+     * 1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏 8转发
      */
     private Integer type;
 
     /**
-     * 1帖子 2评论
+     * 目标类型：1帖子 2用户 3板块（板块关注通知走 3）
      */
     private Integer targetType;
 

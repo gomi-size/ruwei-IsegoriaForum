@@ -62,6 +62,14 @@ public class PostDTO implements Serializable {
     private List<String> imageUrl;
 
     /**
+     * 结构化内容块（图文混排）：前端按数组顺序渲染，实现「文字与图片交错排列」。
+     *
+     * <p>与 {@code content} / {@code imageUrl} <b>互斥优先</b>——传入 contentBlocks 时以其为准；
+     * 为空时回退老逻辑（纯文本正文 + post_image 图集），保证旧客户端兼容。</p>
+     */
+    private List<ContentBlock> contentBlocks;
+
+    /**
      * 话题（传递的 tag 的 id 列表，标签须已存在且未被禁用）
      */
     private List<Long> topicList;

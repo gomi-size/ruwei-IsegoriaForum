@@ -28,4 +28,5 @@ public class BoardFollowEvent extends ApplicationEvent {
         this.boardId = boardId;
         this.ownerId = ownerId;
     }
+
 }

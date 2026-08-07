@@ -3,6 +3,7 @@ package com.ruwei.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -14,12 +15,16 @@ import com.ruwei.domain.dto.BoardUpdateDTO;
 import com.ruwei.domain.dto.CreateBoardDTO;
 import com.ruwei.domain.empty.Board;
 import com.ruwei.component.SensitiveWordFilter;
+import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.mapper.BoardMapper;
 import com.ruwei.service.BoardService;
+import com.ruwei.service.PostService;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 
 /**
@@ -36,6 +41,7 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
 
     @Resource
     private SensitiveWordFilter sensitiveWordFilter;
+
 
     /**
      * 创建贴吧
@@ -128,7 +134,7 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board>
         Board board = getById(id);
         ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
 
-        // 仅创建者可操作，管理员请走 banBoardByAdmin / deleteBoardByAdmin
+        // 仅创建者可操作/管理员
         ThrowUtils.throwIf(loginId!=board.getCreatorId()&&!userService.isAdmin(),
                 ErrorCode.NO_AUTH_ERROR, "只能删除自己创建的板块");
 
