@@ -31,6 +31,7 @@ public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
     implements TagService{
 
 
+
     @Resource
     private SensitiveWordFilter sensitiveWordFilter;
 
@@ -58,6 +59,8 @@ public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
                 ErrorCode.PARAMS_ERROR, "标签名不能为空");
         String name = dto.getName().trim();
         ThrowUtils.throwIf(name.length() > 64, ErrorCode.PARAMS_ERROR, "标签名最多64字");
+
+        sensitiveWordFilter.checkStrict(dto.getName(),"标签");
 
         // name 唯一（ukName 兜底，先查做友好提示）
         Long exists = lambdaQuery().eq(Tag::getName, name).count();

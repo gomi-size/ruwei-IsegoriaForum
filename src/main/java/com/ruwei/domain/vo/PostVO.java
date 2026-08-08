@@ -179,5 +179,12 @@ public class PostVO implements Serializable {
      */
     private Date updatedAt;
 
+    /**
+     * 草稿来源帖 id（仅草稿记录返回；null=新建草稿，非 null=由某篇正式帖编辑而来）。
+     * 前端草稿箱据此区分草稿类型，发布时由后端按此字段决定更新原帖或新建。
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long draftOfId;
+
     private static final long serialVersionUID = 1L;
 }

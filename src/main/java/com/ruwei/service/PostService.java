@@ -171,4 +171,26 @@ public interface PostService extends IService<Post> {
      * @return 待审核稿子的分页结果（PostVO，图片按「审核中」版本回读）
      */
     IPage<PostVO> listReviewingPosts(PostQueryDTO postQueryDTO);
+
+    /**
+     * 发布草稿（草稿箱 → 发布）。按草稿的 {@code draftOfId} 决定去向：
+     * <ul>
+     *   <li><b>draftOfId 非空</b>（编辑草稿）：把本次传入内容应用到原帖并重新送审（先审后发）；</li>
+     *   <li><b>draftOfId 为空</b>（新建草稿）：用本次传入内容创建新帖送审。</li>
+     * </ul>
+     * 成功后删除草稿记录（含图片/标签关联清理）。发布内容以本次请求为准（草稿槽位可能滞后）。
+     *
+     * @param draftId 草稿记录 id
+     * @param dto     发布内容（status 强制走送审，作者不能借草稿绕过审核）
+     * @return 目标帖子 id（字符串）：编辑草稿返回原帖 id，新建草稿返回新帖 id
+     */
+    BaseResponse<String> publishDraft(Long draftId, PostDTO dto);
+
+    /**
+     * 删除草稿（作者本人）：逻辑删除草稿记录，并清理其图片/标签关联（标签 useCount 回退）。
+     * 与 deletePost 的区别：草稿未参与板块/作者计数，不做计数回退。
+     *
+     * @param id 草稿记录内部主键
+     */
+    void deleteDraft(Long id);
 }

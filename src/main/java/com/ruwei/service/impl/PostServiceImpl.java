@@ -116,6 +116,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         // 当前登录用户内部 id（= Sa-Token loginId）
         long loginId = StpUtil.getLoginIdAsLong();
 
+        // ===== 草稿分支：保存为「新建草稿」（draftOfId=null 槽位），不送审、不强制标题/内容非空 =====
+        if (PostStatusEnum.DRAFT.getText().equals(dto.getStatus())) {
+            return saveAsNewDraft(dto, loginId);
+        }
 
         // 1. 参数校验
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
@@ -135,8 +139,6 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             Board board = boardService.getById(dto.getBoardId());
             ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
         }
-        boolean exists = lambdaQuery().eq(Post::getTitle, dto.getTitle()).exists();
-        ThrowUtils.throwIf(exists,ErrorCode.PARAMS_ERROR,"标题存在高度相似请重新输入标题");
 
         // 3. 敏感词过滤（拦截即拒；替换词脱敏后存储）。content 由 blocks 序列化或纯文本兜底
         String title = scrub(dto.getTitle(), "标题");
@@ -201,6 +203,170 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     }
 
     /**
+     * 保存「新建草稿」：同一用户仅保留一条 draftOfId=null 的草稿（槽位 upsert）。
+     *
+     * <p>草稿不送审、不强制标题/内容非空、不做标题重复校验（用户可能先写一半）；
+     * 内容照常过敏感词（拦截即拒、替换词脱敏存储），板块存在性照常校验。</p>
+     */
+    private PostVO saveAsNewDraft(PostDTO dto, long loginId) {
+        // 板块存在性校验（选了板块时）
+        if (dto.getBoardId() != null) {
+            Board board = boardService.getById(dto.getBoardId());
+            ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
+        }
+
+        String title = scrub(dto.getTitle(), "标题");
+        String content = resolveContent(dto);
+        List<Tag> tags = resolveTags(dto.getTopicList());
+        String topic = tags.isEmpty() ? null : joinTagNames(tags);
+        Integer visibilityCode = PostVisibilityEnum.codeOfText(dto.getVisibility());
+        ThrowUtils.throwIf(StrUtil.isNotBlank(dto.getVisibility()) && visibilityCode == null,
+                ErrorCode.PARAMS_ERROR, "非法的可见性：" + dto.getVisibility());
+
+        // 槽位查询：该用户是否已有「新建草稿」（draftOfId IS NULL）
+        Post draft = lambdaQuery()
+                .eq(Post::getUserId, loginId)
+                .eq(Post::getStatus, PostStatusEnum.DRAFT.getCode())
+                .isNull(Post::getDraftOfId)
+                .one();
+
+        if (draft == null) {
+            draft = new Post();
+            draft.setPostCode(generatePostCode());
+            draft.setUserId(loginId);
+            draft.setDraftOfId(null);
+            draft.setStatus(PostStatusEnum.DRAFT.getCode());
+            draft.setAuditStatus(PostAuditStatusEnum.PENDING.getCode());
+            draft.setLikeCount(0);
+            draft.setCommentCount(0);
+            draft.setCollectCount(0);
+            draft.setViewCount(0);
+            draft.setShareCount(0);
+            draft.setIsTop(0);
+            draft.setIsEssence(0);
+        }
+
+        // 覆盖本次传入的内容字段（空标题落空串，草稿允许未写完）
+        draft.setBoardId(dto.getBoardId());
+        draft.setTitle(title == null ? "" : title);
+        draft.setContent(content);
+        if (dto.getCover() != null) {
+            draft.setCover(dto.getCover());
+        }
+        if (dto.getType() != null) {
+            draft.setType(dto.getType());
+        }
+        if (dto.getVideoUrl() != null) {
+            draft.setVideoUrl(dto.getVideoUrl());
+        }
+        if (topic != null) {
+            draft.setTopic(topic);
+        }
+        if (visibilityCode != null) {
+            draft.setVisibility(visibilityCode);
+        }
+        draft.setLatitude(dto.getLatitude());
+        draft.setLongitude(dto.getLongitude());
+        draft.setLocationName(dto.getLocationName());
+
+        boolean saved = draft.getId() != null ? updateById(draft) : save(draft);
+        ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "草稿保存失败");
+
+        // 图片/标签按草稿版本维护：旧客户端（仅传 imageUrl）写 post_image；新数据已内联进 content
+        if ((dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty())
+                && dto.getImageUrl() != null) {
+            rebuildImages(draft.getId(), dto.getImageUrl(), PostStatusEnum.DRAFT.getCode());
+        }
+        if (!tags.isEmpty()) {
+            rebuildTags(draft.getId(), tags, PostStatusEnum.DRAFT.getCode());
+        }
+        return buildPostVO(draft);
+    }
+
+    /**
+     * 保存「编辑草稿」：同一用户对同一原帖（draftOfId=原帖id）仅保留一条草稿，槽位 upsert。
+     *
+     * <p>草稿不送审、不对外展示；发布走 {@link #publishDraft(Long, PostDTO)}。</p>
+     *
+     * @return 草稿 id（字符串），前端可用于跳转草稿编辑态
+     */
+    private BaseResponse<String> saveAsEditDraft(PostDTO dto, Post original, long loginId,
+                                                 String title, String content, String topic,
+                                                 List<Tag> topicTags) {
+        // 槽位查询：同用户对同一原帖是否已有草稿
+        Post draft = lambdaQuery()
+                .eq(Post::getUserId, loginId)
+                .eq(Post::getStatus, PostStatusEnum.DRAFT.getCode())
+                .eq(Post::getDraftOfId, dto.getId())
+                .one();
+
+        if (draft == null) {
+            draft = new Post();
+            draft.setPostCode(dto.getPostCode());
+            draft.setUserId(loginId);
+            draft.setDraftOfId(dto.getId());
+            draft.setStatus(PostStatusEnum.DRAFT.getCode());
+            draft.setAuditStatus(PostAuditStatusEnum.PENDING.getCode());
+            draft.setLikeCount(0);
+            draft.setCommentCount(0);
+            draft.setCollectCount(0);
+            draft.setViewCount(0);
+            draft.setShareCount(0);
+            draft.setIsTop(0);
+            draft.setIsEssence(0);
+        }
+
+        // 覆盖本次传入的内容字段
+        draft.setBoardId(dto.getBoardId());
+        // 标题：本次传入（已过敏感词）非空则覆盖，否则沿用已有草稿/原帖
+        draft.setTitle(StrUtil.isNotBlank(title)
+                ? title
+                : (StrUtil.isNotBlank(draft.getTitle()) ? draft.getTitle() : original.getTitle()));
+        // 内容：本次传入优先；未变更时保留草稿已有内容，再回退原帖
+        draft.setContent(content != null
+                ? content
+                : (draft.getContent() != null ? draft.getContent() : original.getContent()));
+        if (dto.getCover() != null) {
+            draft.setCover(dto.getCover());
+        }
+        if (dto.getType() != null) {
+            draft.setType(dto.getType());
+        }
+        if (dto.getVideoUrl() != null) {
+            draft.setVideoUrl(dto.getVideoUrl());
+        }
+        if (topic != null) {
+            draft.setTopic(topic);
+        } else {
+            draft.setTopic(original.getTopic());
+        }
+        // 可见性：前端传文字 → 枚举转整数；仅在本次传入时覆盖，否则沿用原帖
+        if (StrUtil.isNotBlank(dto.getVisibility())) {
+            Integer vc = PostVisibilityEnum.codeOfText(dto.getVisibility());
+            ThrowUtils.throwIf(vc == null, ErrorCode.PARAMS_ERROR, "非法的可见性：" + dto.getVisibility());
+            draft.setVisibility(vc);
+        } else {
+            draft.setVisibility(original.getVisibility());
+        }
+        draft.setLatitude(dto.getLatitude());
+        draft.setLongitude(dto.getLongitude());
+        draft.setLocationName(dto.getLocationName());
+
+        boolean saved = draft.getId() != null ? updateById(draft) : save(draft);
+        ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "草稿保存失败");
+
+        // 图片/标签按「草稿自身的 id + 草稿状态」全量替换（必须用 draft.getId()，用原帖 id 会误删原帖数据）
+        if ((dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty())
+                && dto.getImageUrl() != null) {
+            rebuildImages(draft.getId(), dto.getImageUrl(), PostStatusEnum.DRAFT.getCode());
+        }
+        if (topicTags != null) {
+            rebuildTags(draft.getId(), topicTags, PostStatusEnum.DRAFT.getCode());
+        }
+        return ResultUtils.success(StrUtil.toString(draft.getId()));
+    }
+
+    /**
      * 编辑帖子（先发后审；草稿直改）。
      */
     @Override
@@ -232,44 +398,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<Tag> topicTags = dto.getTopicList() == null ? null : resolveTags(dto.getTopicList());
         String topic = topicTags == null ? null : joinTagNames(topicTags);
 
-        // ===== 草稿：单独保存一条记录，不走审核（展示用户的一定是已发布的） =====
+        // ===== 草稿：写入「编辑草稿槽位」（同一原帖最多一条草稿，upsert），不走审核 =====
         if (PostStatusEnum.DRAFT.getText().equals(dto.getStatus())) {
-            Post update = BeanUtil.copyProperties(dto, Post.class);
-            //单独保存为一个为草稿
-            update.setId(null);
-            update.setPostCode(dto.getPostCode());
-            update.setUserId(loginId);
-            update.setIsTop(0);
-            update.setTopic(topic != null ? topic : post.getTopic());
-            // 内容：blocks 序列化为 JSON 或纯文本兜底；未变更时沿用原帖内容
-            update.setContent(content != null ? content : post.getContent());
-            // 可见性：前端传文字 → 枚举转整数；仅在本次传入时覆盖，否则沿用原帖
-            if (StrUtil.isNotBlank(dto.getVisibility())) {
-                Integer vc = PostVisibilityEnum.codeOfText(dto.getVisibility());
-                ThrowUtils.throwIf(vc == null, ErrorCode.PARAMS_ERROR, "非法的可见性：" + dto.getVisibility());
-                update.setVisibility(vc);
-            } else {
-                update.setVisibility(post.getVisibility());
-            }
-            // 生命周期与审核结果由后端固定：草稿 + 待审。
-            update.setStatus(PostStatusEnum.DRAFT.getCode());
-            //设置为待审核
-            update.setAuditStatus(PostAuditStatusEnum.PENDING.getCode());
-            //这里保存草稿
-            boolean result = save(update);
-            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "编辑失败");
-
-            // 图片/标签按「新草稿自身的 id + 自身状态」写入；
-            // 注意必须用 update.getId()（新草稿），用 post.getId() 会把原帖的图片/标签删掉
-            // 旧客户端（仅传 imageUrl）仍写 post_image；新数据图片已内联进 content
-            if ((dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty())
-                    && dto.getImageUrl() != null) {
-                rebuildImages(update.getId(), dto.getImageUrl(), update.getStatus());
-            }
-            if (topicTags != null) {
-                rebuildTags(update.getId(), topicTags, update.getStatus());
-            }
-            return ResultUtils.success("修改成功，已存入草稿箱");
+            return saveAsEditDraft(dto, post, loginId, title, content, topic, topicTags);
         }
 
         // ===== 非草稿：直接改正式字段，并整体重新送审（审核中 + 待审）=====
@@ -370,6 +501,85 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }
         //4.作者的作品数减少一
         CountUtils.increment(userService, User::getId, loginId, "postCount", -1);
+    }
+
+    /**
+     * 发布草稿：按草稿的 draftOfId 决定去向——编辑草稿更新原帖送审、新建草稿创建送审，
+     * 成功后删除草稿记录。发布内容以本次请求为准（草稿槽位内容可能滞后于前端编辑）。
+     *
+     * @return 目标帖子 id（字符串）：编辑草稿返回原帖 id，新建草稿返回新帖 id
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public BaseResponse<String> publishDraft(Long draftId, PostDTO dto) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(draftId == null || BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "参数不能为空");
+
+        Post draft = lambdaQuery()
+                .eq(Post::getId, draftId)
+                .eq(Post::getUserId, loginId)
+                .eq(Post::getStatus, PostStatusEnum.DRAFT.getCode())
+                .one();
+        ThrowUtils.throwIf(BeanUtil.isEmpty(draft), ErrorCode.NOT_FOUND_ERROR, "草稿不存在");
+
+        // 发布内容由本次请求为准，且强制走送审：status 置空，避免作者借草稿字段绕过审核
+        dto.setStatus(null);
+
+        String targetId;
+        if (draft.getDraftOfId() != null) {
+            // 编辑草稿 → 应用内容到原帖（先审后发）
+            dto.setId(draft.getDraftOfId());
+            if (StrUtil.isBlank(dto.getPostCode())) {
+                Post original = getById(draft.getDraftOfId());
+                ThrowUtils.throwIf(BeanUtil.isEmpty(original), ErrorCode.NOT_FOUND_ERROR, "原帖不存在");
+                dto.setPostCode(original.getPostCode());
+            }
+            updatePost(dto);
+            targetId = StrUtil.toString(draft.getDraftOfId());
+        } else {
+            // 新建草稿 → 创建送审（标题重复/内容非空等校验在 createPost 内）
+            PostVO vo = createPost(dto);
+            targetId = StrUtil.toString(vo.getId());
+        }
+
+        deleteDraftRecord(draftId);
+        return ResultUtils.success(targetId);
+    }
+
+    /**
+     * 删除草稿（作者本人）：逻辑删除草稿记录，并清理图片/标签关联（标签 useCount 回退）。
+     * 草稿未参与板块/作者计数，无需回退计数。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteDraft(Long id) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "草稿 id 不能为空");
+
+        Post draft = lambdaQuery()
+                .eq(Post::getId, id)
+                .eq(Post::getUserId, loginId)
+                .eq(Post::getStatus, PostStatusEnum.DRAFT.getCode())
+                .one();
+        ThrowUtils.throwIf(BeanUtil.isEmpty(draft), ErrorCode.NOT_FOUND_ERROR, "草稿不存在");
+
+        deleteDraftRecord(id);
+    }
+
+    /** 草稿记录清理（逻辑删除 + 图片/标签关联物理删 + 标签 useCount 回退） */
+    private void deleteDraftRecord(Long draftId) {
+        boolean removed = removeById(draftId);
+        ThrowUtils.throwIf(!removed, ErrorCode.OPERATION_ERROR, "草稿删除失败");
+
+        postImageService.remove(new LambdaQueryWrapper<PostImage>().eq(PostImage::getPostId, draftId));
+        List<PostTag> postTags = postTagService.lambdaQuery()
+                .eq(PostTag::getPostId, draftId)
+                .list();
+        for (PostTag pt : postTags) {
+            tagService.lambdaUpdate().eq(Tag::getId, pt.getTagId())
+                    .setSql("useCount = useCount - 1").update();
+        }
+        postTagService.remove(new LambdaQueryWrapper<PostTag>().eq(PostTag::getPostId, draftId));
     }
 
     /**

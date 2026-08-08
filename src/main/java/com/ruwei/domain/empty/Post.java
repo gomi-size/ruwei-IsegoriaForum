@@ -151,6 +151,12 @@ public class Post implements Serializable {
     @TableLogic
     private Integer isDelete;
 
+    /**
+     * 草稿来源帖 id（仅草稿记录使用；null 表示「新建」的草稿，非 null 表示由某篇正式帖编辑而来）。
+     * 草稿槽位约束：同一用户对同一来源（draftOfId 相同，新建草稿为 null）最多一条草稿。
+     */
+    private Long draftOfId;
+
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;
 }

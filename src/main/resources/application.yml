@@ -17,6 +17,10 @@ cors:
     - http://127.0.0.1:3000
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
   datasource:
     # 数据库连接URL，包含主机、端口、数据库名及常用参数
     url: jdbc:mysql://localhost:3306/frorum?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
@@ -38,6 +42,8 @@ spring:
           max-idle: 8
           min-idle: 0
           max-wait: -1ms
+  profiles:
+    active: local
 
 sa-token:
   token-name: isegoria            # 前端 header / Cookie 统一使用的 key

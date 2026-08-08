@@ -22,6 +22,12 @@ public class PostDTO implements Serializable {
     private Long id;
 
     /**
+     * 草稿记录 id（仅 {@code POST /post/publishDraft} 使用）：
+     * 标识要发布的草稿，后端按草稿的 draftOfId 决定「更新原帖送审」还是「新建送审」。
+     */
+    private Long draftId;
+
+    /**
      * 对外唯一编码
      */
     private String postCode;

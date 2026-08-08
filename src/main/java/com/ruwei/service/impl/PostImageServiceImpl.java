@@ -1,23 +1,87 @@
 package com.ruwei.service.impl;
 
-
+import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.core.io.FileTypeUtil;
+import cn.hutool.core.util.IdUtil;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.ruwei.common.ErrorCode;
+import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.empty.PostImage;
-import com.ruwei.service.PostImageService;
+import com.ruwei.domain.vo.ImageUploadVO;
+import com.ruwei.exception.BusinessException;
+import com.ruwei.manager.CosManager;
 import com.ruwei.mapper.PostImageMapper;
+import com.ruwei.service.PostImageService;
+import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
+import java.util.Set;
 
 /**
-* @author Administrator
-* @description 针对表【post_image(帖子图片表)】的数据库操作Service实现
-* @createDate 2026-08-05 10:22:22
-*/
+ * 帖子图片业务：校验、COS key 生成、上传结果组装。
+ */
 @Service
 public class PostImageServiceImpl extends ServiceImpl<PostImageMapper, PostImage>
-    implements PostImageService{
+        implements PostImageService {
 
+    private static final long MAX_FILE_SIZE = 5 * 1024 * 1024L;
+
+    private static final Set<String> ALLOWED_TYPES = Set.of("jpg", "jpeg", "png", "webp", "gif");
+
+    private static final Map<String, String> TYPE_MIME = Map.of(
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "png", "image/png",
+            "webp", "image/webp",
+            "gif", "image/gif");
+
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    @Resource
+    private CosManager cosManager;
+
+
+    @Override
+    public ImageUploadVO uploadImage(MultipartFile file) {
+        ThrowUtils.throwIf(file == null || file.isEmpty(), ErrorCode.PARAMS_ERROR, "图片不能为空");
+        ThrowUtils.throwIf(file.getSize() > MAX_FILE_SIZE, ErrorCode.PARAMS_ERROR, "图片大小不能超过5MB");
+
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "读取上传图片失败");
+        }
+
+        // 校验真实文件头，不信任前端文件名和 Content-Type
+        String fileType = FileTypeUtil.getType(new ByteArrayInputStream(bytes));
+        ThrowUtils.throwIf(!ALLOWED_TYPES.contains(fileType), ErrorCode.PARAMS_ERROR,
+                "仅支持jpg/png/webp/gif格式的图片");
+
+        String ext = "jpeg".equals(fileType) ? "jpg" : fileType;
+        long loginId = StpUtil.getLoginIdAsLong();
+        String key = loginId + "/" + LocalDate.now().format(DATE_FORMAT)
+                + "/" + IdUtil.simpleUUID() + "." + ext;
+
+        CosManager.CosUploadResult result = cosManager.uploadImage(key, bytes, TYPE_MIME.get(fileType));
+
+
+        return buildUploadVO(result);
+    }
+
+    private ImageUploadVO buildUploadVO(CosManager.CosUploadResult result) {
+        ImageUploadVO vo = new ImageUploadVO();
+        vo.setUrl(result.displayUrl());
+        vo.setWidth(result.width());
+        vo.setHeight(result.height());
+        vo.setSize(result.size());
+        vo.setMime(result.contentType());
+        return vo;
+    }
 }
-
-
-
-

@@ -92,6 +92,28 @@ public class PostController {
     }
 
     /**
+     * 发布草稿（草稿箱 → 发布）。
+     *
+     * <p>按草稿的 {@code draftOfId} 自动决定去向：编辑草稿 → 内容应用到原帖并重新送审
+     * （先审后发）；新建草稿 → 创建新帖送审。成功后草稿记录被删除。发布内容以本次请求为准。</p>
+     *
+     * @return 目标帖子 id（字符串）：编辑草稿返回原帖 id，新建草稿返回新帖 id
+     */
+    @PostMapping("/publishDraft")
+    public BaseResponse<String> publishDraft(@RequestBody PostDTO postDTO) {
+        return postService.publishDraft(postDTO.getDraftId(), postDTO);
+    }
+
+    /**
+     * 删除草稿（作者本人）：逻辑删除草稿记录，并清理其图片/标签关联。
+     */
+    @DeleteMapping("/draft/{id}")
+    public BaseResponse<String> deleteDraft(@PathVariable Long id) {
+        postService.deleteDraft(id);
+        return ResultUtils.success("草稿已删除");
+    }
+
+    /**
      * （点进主页后的查询 / 帖子列表页）分页查询帖子：可查自己的稿子、也可查别人的稿子。
      *
      * <p>条件：id / postCode / boardId / title / userId / createdAt（字符串字段模糊匹配、id 类字段精确匹配），

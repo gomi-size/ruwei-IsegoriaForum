@@ -68,6 +68,14 @@
             <version>5.8.26</version> <!-- 建议根据需要使用最新稳定版本 -->
         </dependency>
 
+        <!--COS-->
+        <dependency>
+            <groupId>com.qcloud</groupId>
+            <artifactId>cos_api</artifactId>
+            <version>5.6.227</version>
+        </dependency>
+
+
         <!--https://doc.xiaominfo.com/， knife4j-->
         <dependency>
             <groupId>com.github.xiaoymin</groupId>
