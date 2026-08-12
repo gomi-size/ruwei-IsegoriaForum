@@ -9,7 +9,8 @@ import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.empty.PostImage;
 import com.ruwei.domain.vo.ImageUploadVO;
 import com.ruwei.exception.BusinessException;
-import com.ruwei.manager.CosManager;
+import com.ruwei.manager.ObjectStorageManager;
+import com.ruwei.manager.UploadResult;
 import com.ruwei.mapper.PostImageMapper;
 import com.ruwei.service.PostImageService;
 import jakarta.annotation.Resource;
@@ -44,7 +45,7 @@ public class PostImageServiceImpl extends ServiceImpl<PostImageMapper, PostImage
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     @Resource
-    private CosManager cosManager;
+    private ObjectStorageManager objectStorageManager;
 
 
     @Override
@@ -69,13 +70,17 @@ public class PostImageServiceImpl extends ServiceImpl<PostImageMapper, PostImage
         String key = loginId + "/" + LocalDate.now().format(DATE_FORMAT)
                 + "/" + IdUtil.simpleUUID() + "." + ext;
 
-        CosManager.CosUploadResult result = cosManager.uploadImage(key, bytes, TYPE_MIME.get(fileType));
-
+        UploadResult result;
+        try {
+            result = objectStorageManager.uploadImage(key, bytes, TYPE_MIME.get(fileType));
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图片上传失败");
+        }
 
         return buildUploadVO(result);
     }
 
-    private ImageUploadVO buildUploadVO(CosManager.CosUploadResult result) {
+    private ImageUploadVO buildUploadVO(UploadResult result) {
         ImageUploadVO vo = new ImageUploadVO();
         vo.setUrl(result.displayUrl());
         vo.setWidth(result.width());

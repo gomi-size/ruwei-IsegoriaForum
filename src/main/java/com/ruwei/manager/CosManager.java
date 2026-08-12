@@ -3,7 +3,6 @@ package com.ruwei.manager;
 import cn.hutool.core.util.StrUtil;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.exception.CosClientException;
-import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.GetObjectRequest;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.model.PutObjectRequest;
@@ -15,6 +14,7 @@ import com.qcloud.cos.model.ciModel.persistence.OriginalInfo;
 import com.qcloud.cos.model.ciModel.persistence.PicOperations;
 import com.ruwei.config.CosClientConfig;
 import jakarta.annotation.Resource;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;
@@ -22,13 +22,15 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 /**
- * 通用的文件处理类
+ * 通用的文件处理类（COS 实现）
  */
 @Component
-public class CosManager {
+@ConditionalOnProperty(prefix = "storage", name = "type", havingValue = "cos", matchIfMissing = true)
+public class CosManager implements ObjectStorageManager {
 
     private static final String WEBP_FORMAT_RULE = "imageMogr2/format/webp";
 
@@ -38,10 +40,12 @@ public class CosManager {
     @Resource
     private COSClient cosClient;
 
-    public PutObjectResult putObject(String key, File file) {
+    @Override
+    public UploadResult putObject(String key, File file) {
         PutObjectRequest putObjectRequest = new PutObjectRequest(cosClientConfig.getBucket(), key,
                 file);
-        return cosClient.putObject(putObjectRequest);
+        cosClient.putObject(putObjectRequest);
+        return buildMinimalResult(key, file.length());
     }
 
     /**
@@ -49,9 +53,10 @@ public class CosManager {
      *
      * @param key 唯一键（是文件夹加上文件的名字）
      */
-    public COSObject getObject(String key) {
+    @Override
+    public InputStream getObject(String key) {
         GetObjectRequest getObjectRequest = new GetObjectRequest(cosClientConfig.getBucket(), key);
-        return cosClient.getObject(getObjectRequest);
+        return cosClient.getObject(getObjectRequest).getObjectContent();
     }
 
     /**
@@ -62,7 +67,8 @@ public class CosManager {
      * @param bytes       图片字节
      * @param contentType 图片 MIME 类型
      */
-    public CosUploadResult uploadImage(String key, byte[] bytes, String contentType) {
+    @Override
+    public UploadResult uploadImage(String key, byte[] bytes, String contentType) {
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(bytes.length);
         metadata.setContentType(contentType);
@@ -93,7 +99,8 @@ public class CosManager {
      * @param file 文件
      *             必须要添加图片处理操作否则会报错
      */
-    public PutObjectResult putPictureObject(String key, File file) {
+    @Override
+    public UploadResult putPictureObject(String key, File file) {
         PutObjectRequest putObjectRequest = new PutObjectRequest(cosClientConfig.getBucket(), key,
                 file);
         //（获取基本信息也被视为一种处理）picOperations图片处理对象
@@ -117,7 +124,9 @@ public class CosManager {
         //图片处理规则putObjectRequest把图片处理对象放入到这个类中
         putObjectRequest.setPicOperations(picOperations);
 
-        return cosClient.putObject(putObjectRequest);
+        cosClient.putObject(putObjectRequest);
+        return new UploadResult(key, webpKey, buildUrl(key), buildUrl(webpKey), null, null,
+                file.length(), null);
     }
 
 
@@ -126,13 +135,14 @@ public class CosManager {
      *
      * @param key 文件 key
      */
+    @Override
     public void deleteObject(String key) throws CosClientException {
         cosClient.deleteObject(cosClientConfig.getBucket(), key);
     }
 
 
-    private CosUploadResult buildUploadResult(String key, String webpKey, byte[] bytes,
-                                              String contentType, PutObjectResult result) {
+    private UploadResult buildUploadResult(String key, String webpKey, byte[] bytes,
+                                           String contentType, PutObjectResult result) {
         String displayKey = webpKey != null ? webpKey : key;
         String originalUrl = buildUrl(key);
         String displayUrl = buildUrl(displayKey);
@@ -176,8 +186,12 @@ public class CosManager {
             }
         }
 
-        return new CosUploadResult(key, displayKey, originalUrl, displayUrl, width, height,
+        return new UploadResult(key, displayKey, originalUrl, displayUrl, width, height,
                 (long) bytes.length, contentType);
+    }
+
+    private UploadResult buildMinimalResult(String key, long size) {
+        return new UploadResult(key, key, buildUrl(key), buildUrl(key), null, null, size, null);
     }
 
     private String buildUrl(String key) {
@@ -211,10 +225,5 @@ public class CosManager {
     }
 
     private record ImageSize(int width, int height) {
-    }
-
-    public record CosUploadResult(String originalKey, String displayKey, String originalUrl,
-                                  String displayUrl, Integer width, Integer height,
-                                  Long size, String contentType) {
     }
 }
