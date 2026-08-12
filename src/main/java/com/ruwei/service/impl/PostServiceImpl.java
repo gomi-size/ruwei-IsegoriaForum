@@ -22,6 +22,7 @@ import com.ruwei.component.notification.event.PostEvent;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
+import com.ruwei.domain.dto.AdminPostStatusDTO;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.dto.ContentBlock;
 import com.ruwei.domain.dto.PostQueryDTO;
@@ -64,7 +65,8 @@ import java.util.stream.Collectors;
 *   <li>图片/标签<b>按版本状态分组</b>：post_image.status / post_tag.status 记录该行属于帖子的哪个版本
 *       （已发布 / 草稿 / 审核中）。写入时只在同一 status 内全量替换（先查、无则插、有则删旧插新），
 *       其它版本不受影响；审核结束由 migrateReviewingRelations 把「审核中」版整体顶替为最终状态；</li>
-*   <li>板块帖子数口径：仅创建时 +1（审核中/驳回也算帖子），删除时 -1，审核环节不再累加；</li>
+*   <li>计数口径（user.postCount / board.postCount）：仅「已发布」计入——创建送审不加、审核通过 +1；
+*       编辑已发布帖送审时回收（-1）、通过后恢复；驳回不计数也不回收；删除仅对「已发布」帖子回退；</li>
 *   <li>审核只推进状态、不搬运内容：待审内容在创建/编辑时已落在正式字段上，
 *       通过→已发布、驳回→下架（正式字段已被覆盖，无旧版本可回退）；</li>
 *   <li>对外编码 postCode 基于 Redis 原子自增（key {@code isegoria:post:code:counter}，前缀 P）。</li>
@@ -189,16 +191,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         // 6. 标签关联（useCount+1 + post_tag）——同上，标记为「审核中」版本
         bindTags(post.getId(), tags, PostStatusEnum.REVIEWING.getCode());
 
-        // 7. 板块帖子数 +1
-        if (dto.getBoardId() != null) {
-            CountUtils.increment(boardService, Board::getId, dto.getBoardId(), "postCount", 1);
-        }
-
-        //8.作者的作品数加一
-        CountUtils.increment(userService, User::getId, loginId, "postCount", 1);
-
-
-        // 9. 装配对外 VO：枚举字段回显文字、topic 解析为 id 列表、图片按 sort 回读
+        // 7. 计数口径：创建送审（审核中）不计数——仅「已发布」计入 user.postCount / board.postCount，
+        //    审核通过时由 auditPost +1；编辑送审/删除的回收见 updatePost / deletePost
+        // 8. 装配对外 VO：枚举字段回显文字、topic 解析为 id 列表、图片按 sort 回读
         return buildPostVO(post);
     }
 
@@ -424,6 +419,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         boolean updated = update(uw);
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "编辑失败");
 
+        // 计数口径：编辑即下架送审（已发布→审核中），若原帖为「已发布」（已计入），回收板块/作者计数；
+        // 审核通过后由 auditPost 重新 +1，驳回则保持回收（帖子对外不可见，不计入作品数）
+        if (PostStatusEnum.PUBLISHED.matches(post.getStatus())) {
+            if (post.getBoardId() != null) {
+                CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", -1);
+            }
+            CountUtils.increment(userService, User::getId, loginId, "postCount", -1);
+        }
+
         // 图片 / 标签写入「审核中」版本：仅旧客户端（仅传 imageUrl）写 post_image；
         // 新数据（contentBlocks）图片已内联进 content，无需写 post_image
         if (dto.getContentBlocks() == null || dto.getContentBlocks().isEmpty()) {
@@ -495,12 +499,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }
         postTagService.remove(new LambdaQueryWrapper<PostTag>().eq(PostTag::getPostId, id));
 
-        // 3. 板块帖子数 -1
-        if (post.getBoardId() != null) {
-            CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", -1);
+        // 3. 计数口径：仅「已发布」帖子曾计入板块/作者计数，删除时才回收；
+        //    审核中/草稿/下架本未计数（或已回收），删除不回退。
+        //    作者 id 用 post.getUserId()——兼容管理员代删，避免扣到管理员头上
+        if (PostStatusEnum.PUBLISHED.matches(post.getStatus())) {
+            if (post.getBoardId() != null) {
+                CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", -1);
+            }
+            CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", -1);
         }
-        //4.作者的作品数减少一
-        CountUtils.increment(userService, User::getId, loginId, "postCount", -1);
     }
 
     /**
@@ -613,6 +620,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .set(Post::getAuditStatus, auditResult.getCode())
                 .update();
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "审核操作失败，请刷新后重试");
+
+        // 计数口径：仅「审核通过」（审核中→已发布）才 +1；驳回（→下架）不计数也不回收。
+        // 注意必须用 post.getUserId()——操作者是管理员，StpUtil 取到的是管理员的 id
+        if (pass) {
+            if (post.getBoardId() != null) {
+                CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", 1);
+            }
+            CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", 1);
+        }
 
         // 「审核中」版本的图片/标签整体迁移为最终状态，并清理该帖其它历史版本（标签同步回退 useCount）
         migrateReviewingRelations(id, finalStatus.getCode());
@@ -763,23 +779,21 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     }
 
     /**
-     * 管理后台帖子列表（统一入口：待审/已发布/草稿/下架 四个筛选都走这里）。
+     * 管理员帖子列表（统一入口：已发布/草稿/审核中/下架 全状态可查）。
      * <p>status 由 {@code PostQueryDTO} 传入（中文文字→枚举码精确匹配）：
      * <ul>
-     *   <li><b>status 为空</b> → 默认只看「审核中」（审核工作台语义）；</li>
-     *   <li><b>status 非空</b> → 按传入状态筛选（已发布/草稿/下架等，管理员全状态可查）。</li>
+     *   <li><b>status 为空</b> → 查询全部状态（不做过滤）；</li>
+     *   <li><b>status 非空</b> → 按传入状态筛选（已发布/草稿/审核中/下架）。</li>
      * </ul>
-     * 条件与用户列表一致（模糊/精确过滤），默认按创建时间倒序；管理端不做可见性过滤。</p>
+     * 条件与用户列表一致（模糊/精确过滤），默认按创建时间倒序；管理端不做可见性过滤。
+     * 图片按帖子当前状态版本回读（loadImageUrls 使用 post.getStatus()）。</p>
      */
     @Override
-    public IPage<PostVO> listReviewingPosts(PostQueryDTO dto) {
+    public IPage<PostVO> listAdminPosts(PostQueryDTO dto) {
         ThrowUtils.throwIf(BeanUtil.isEmpty(dto), ErrorCode.PARAMS_ERROR, "请求参数不能为空");
 
+        // status 的筛选完全交给 getPostQueryWrapper：传了按状态精确匹配，不传则不附加条件（查全部）
         QueryWrapper<Post> queryWrapper = QueryWrapperUtils.getPostQueryWrapper(dto);
-        // 未传 status 时兜底为「审核中」；传了 status 则由 getPostQueryWrapper 精确匹配（不要覆盖）
-        if (StrUtil.isBlank(dto.getStatus())) {
-            queryWrapper.eq("status", PostStatusEnum.REVIEWING.getCode());
-        }
         Page<Post> page = this.page(new Page<>(dto.getCurrent(), dto.getPageSize()), queryWrapper);
 
         // 图片按帖子当前状态版本回读（loadImageUrls 使用 post.getStatus()）
@@ -789,6 +803,94 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         IPage<PostVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
+    }
+
+    /**
+     * 管理员自由设置帖子状态（status / visibility，传哪个改哪个，至少传一个）。
+     *
+     * <p><b>status 变化时的联动</b>（保持与审核流口径一致）：</p>
+     * <ul>
+     *   <li><b>计数</b>：user.postCount / board.postCount 按「仅已发布」口径——非发布→已发布 +1，
+     *       已发布→非发布 -1；其余状态互转不调整（用 post.getUserId()，操作者是管理员）；</li>
+     *   <li><b>auditStatus</b>：同步映射——已发布→通过、下架→驳回、草稿/审核中→待审；</li>
+     *   <li><b>图片/标签版本</b>：以变更前状态版本为「当前内容」迁移到新状态，清理其余历史版本
+     *       （标签回退 useCount），复用 {@link #migratePostRelations}。</li>
+     * </ul>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void adminSetPostStatus(AdminPostStatusDTO dto) {
+        ThrowUtils.throwIf(BeanUtil.isEmpty(dto) || dto.getPostId() == null,
+                ErrorCode.PARAMS_ERROR, "帖子 id 不能为空");
+        ThrowUtils.throwIf(dto.getStatus() == null && dto.getVisibility() == null,
+                ErrorCode.PARAMS_ERROR, "status 和 visibility 至少传一个");
+
+        // 枚举合法性校验（null 表示不修改该字段）
+        ThrowUtils.throwIf(dto.getStatus() != null
+                        && PostStatusEnum.getByCode(dto.getStatus()) == null,
+                ErrorCode.PARAMS_ERROR, "非法的状态码：" + dto.getStatus());
+        ThrowUtils.throwIf(dto.getVisibility() != null
+                        && PostVisibilityEnum.getByCode(dto.getVisibility()) == null,
+                ErrorCode.PARAMS_ERROR, "非法的可见性码：" + dto.getVisibility());
+
+        Post post = getById(dto.getPostId());
+        ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+
+        // 幂等：传入字段均与现值相同 → 无需更新
+        boolean statusChanged = dto.getStatus() != null && !dto.getStatus().equals(post.getStatus());
+        boolean visibilityChanged = dto.getVisibility() != null && !dto.getVisibility().equals(post.getVisibility());
+        if (!statusChanged && !visibilityChanged) {
+            return;
+        }
+
+        // 计数联动：仅当 status 跨过「已发布」边界时调整 user/board postCount
+        if (statusChanged) {
+            boolean wasPublished = PostStatusEnum.PUBLISHED.matches(post.getStatus());
+            boolean nowPublished = PostStatusEnum.PUBLISHED.matches(dto.getStatus());
+            if (wasPublished && !nowPublished) {
+                // 已发布 → 非已发布：回收计数
+                if (post.getBoardId() != null) {
+                    CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", -1);
+                }
+                CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", -1);
+            } else if (!wasPublished && nowPublished) {
+                // 非已发布 → 已发布：增加计数
+                if (post.getBoardId() != null) {
+                    CountUtils.increment(boardService, Board::getId, post.getBoardId(), "postCount", 1);
+                }
+                CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", 1);
+            }
+        }
+
+        // 更新帖子：status / visibility / auditStatus（status 变化时同步映射）
+        LambdaUpdateWrapper<Post> uw = new LambdaUpdateWrapper<>();
+        uw.eq(Post::getId, post.getId());
+        uw.set(statusChanged, Post::getStatus, dto.getStatus());
+        uw.set(visibilityChanged, Post::getVisibility, dto.getVisibility());
+        if (statusChanged) {
+            uw.set(Post::getAuditStatus, mapAuditStatusByStatus(dto.getStatus()));
+        }
+        boolean updated = update(uw);
+        ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置失败");
+
+        // 图片/标签版本迁移：以变更前状态版本为「当前内容」迁移到新状态，清理其余历史版本
+        if (statusChanged) {
+            migratePostRelations(post.getId(), post.getStatus(), dto.getStatus());
+        }
+    }
+
+    /**
+     * status 枚举码 → auditStatus 枚举码 的同步映射：
+     * 已发布→通过(2)、下架→驳回(3)、草稿/审核中→待审(1)。
+     */
+    private Integer mapAuditStatusByStatus(Integer statusCode) {
+        if (PostStatusEnum.PUBLISHED.matches(statusCode)) {
+            return PostAuditStatusEnum.APPROVED.getCode();
+        }
+        if (PostStatusEnum.OFFLINE.matches(statusCode)) {
+            return PostAuditStatusEnum.REJECTED.getCode();
+        }
+        return PostAuditStatusEnum.PENDING.getCode();
     }
 
 
@@ -1150,24 +1252,40 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      * @param finalStatus 审核后的最终状态（通过=已发布；驳回=下架）
      */
     private void migrateReviewingRelations(Long postId, Integer finalStatus) {
-        Integer reviewing = PostStatusEnum.REVIEWING.getCode();
-        if (Objects.equals(reviewing, finalStatus)) {
+        migratePostRelations(postId, PostStatusEnum.REVIEWING.getCode(), finalStatus);
+    }
+
+    /**
+     * 迁移帖子图片/标签的版本状态：以 sourceStatus 版本为「当前内容」整体迁移为 finalStatus，
+     * 并清掉该帖<b>除 sourceStatus 以外的所有历史版本</b>（标签同步回退 useCount）。
+     *
+     * <p>版本化存储下（post_image.status / post_tag.status 记录行属于帖子的哪个生命周期版本），
+     * 状态流转时旧版本的图片/标签不再对应任何内容：若只清目标状态那一份，
+     * 其它版本会残留成孤儿数据并长期占着 useCount。清理后可保证：
+     * 迁移结束时该帖只剩一套与帖子状态一致的图片/标签。</p>
+     *
+     * @param postId       帖子内部 id
+     * @param sourceStatus 当前内容所在版本（迁移源：审核流为「审核中」，管理员强制设置时为变更前状态）
+     * @param finalStatus  目标状态（迁移后归属）
+     */
+    private void migratePostRelations(Long postId, Integer sourceStatus, Integer finalStatus) {
+        if (Objects.equals(sourceStatus, finalStatus)) {
             return;
         }
-        // 1. 图片：清掉其它版本（含 status 为 null 的历史脏数据），再把审核中版本迁移过去
+        // 1. 图片：清掉其它版本（含 status 为 null 的历史脏数据），再把 source 版本迁移过去
         postImageService.remove(new LambdaQueryWrapper<PostImage>()
                 .eq(PostImage::getPostId, postId)
-                .and(w -> w.ne(PostImage::getStatus, reviewing).or().isNull(PostImage::getStatus)));
+                .and(w -> w.ne(PostImage::getStatus, sourceStatus).or().isNull(PostImage::getStatus)));
         postImageService.lambdaUpdate()
                 .eq(PostImage::getPostId, postId)
-                .eq(PostImage::getStatus, reviewing)
+                .eq(PostImage::getStatus, sourceStatus)
                 .set(PostImage::getStatus, finalStatus)
                 .update();
 
-        // 2. 标签：其它版本先回退 useCount 再删除，最后把审核中版本迁移过去
+        // 2. 标签：其它版本先回退 useCount 再删除，最后把 source 版本迁移过去
         List<PostTag> staleTags = postTagService.lambdaQuery()
                 .eq(PostTag::getPostId, postId)
-                .and(w -> w.ne(PostTag::getStatus, reviewing).or().isNull(PostTag::getStatus))
+                .and(w -> w.ne(PostTag::getStatus, sourceStatus).or().isNull(PostTag::getStatus))
                 .list();
         if (!staleTags.isEmpty()) {
             for (PostTag pt : staleTags) {
@@ -1176,11 +1294,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             }
             postTagService.remove(new LambdaQueryWrapper<PostTag>()
                     .eq(PostTag::getPostId, postId)
-                    .and(w -> w.ne(PostTag::getStatus, reviewing).or().isNull(PostTag::getStatus)));
+                    .and(w -> w.ne(PostTag::getStatus, sourceStatus).or().isNull(PostTag::getStatus)));
         }
         postTagService.lambdaUpdate()
                 .eq(PostTag::getPostId, postId)
-                .eq(PostTag::getStatus, reviewing)
+                .eq(PostTag::getStatus, sourceStatus)
                 .set(PostTag::getStatus, finalStatus)
                 .update();
     }

@@ -3,9 +3,13 @@ package com.ruwei.controller.manager;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaIgnore;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ruwei.common.BaseResponse;
+import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
+import com.ruwei.common.ThrowUtils;
+import com.ruwei.domain.dto.AdminPostStatusDTO;
 import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.service.PostService;
@@ -39,15 +43,29 @@ public class PostManagerController {
     }
 
     /**
-     * 管理员查看待审核的稿子（status=审核中，不含草稿/已发布/下架），分页查询。
+     * 管理员帖子列表（全状态可查：已发布/草稿/审核中/下架），分页查询。
      *
      * <p>条件与用户列表一致：id / postCode / boardId / title / userId / createdAt
-     * （字符串字段模糊匹配、id 类字段精确匹配），均不传则查全部审核中稿子；
+     * （字符串字段模糊匹配、id 类字段精确匹配）；
+     * <b>status 传中文文字（已发布/草稿/审核中/下架）按状态筛选，不传则查询全部状态</b>；
      * 未传排序字段时默认按创建时间倒序（最新在前）。</p>
      */
     @PostMapping("/list")
-    public BaseResponse<IPage<PostVO>> listReviewingPosts(@RequestBody PostQueryDTO postQueryDTO) {
-        return ResultUtils.success(postService.listReviewingPosts(postQueryDTO));
+    public BaseResponse<IPage<PostVO>> listAdminPosts(@RequestBody PostQueryDTO postQueryDTO) {
+        return ResultUtils.success(postService.listAdminPosts(postQueryDTO));
+    }
+
+    /**
+     * 管理员自由设置帖子状态（status / visibility，传哪个改哪个，至少传一个）。
+     *
+     * <p>status 传枚举码：1已发布 2草稿 3审核中 4下架；visibility 传枚举码：1公开 2仅粉丝可见 3私密。
+     * status 变化时自动联动：user/board 的 postCount 按「仅已发布」口径增减、
+     * auditStatus 同步映射（已发布→通过、下架→驳回、其余→待审）、图片/标签版本归一到新状态。</p>
+     */
+    @PostMapping("/setStatus")
+    public BaseResponse<String> setPostStatus(@RequestBody AdminPostStatusDTO dto) {
+        postService.adminSetPostStatus(dto);
+        return ResultUtils.success("设置成功");
     }
 
 

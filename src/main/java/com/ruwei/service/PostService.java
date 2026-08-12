@@ -3,6 +3,7 @@ package com.ruwei.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.ruwei.common.BaseResponse;
+import com.ruwei.domain.dto.AdminPostStatusDTO;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.empty.Post;
@@ -161,16 +162,32 @@ public interface PostService extends IService<Post> {
     IPage<PostBrowseVO> listFollowPosts(long current, long pageSize);
 
     /**
-     * 管理员查看待审核的稿子（status=审核中，<b>不含草稿</b>/已发布/下架）。
+     * 管理员帖子列表（统一入口：已发布/草稿/审核中/下架 全状态可查）。
      *
      * <p>条件与 {@link #listPosts(PostQueryDTO)} 一致：id / postCode / boardId / title / userId / createdAt
-     * （字符串字段模糊、id 类精确），均不传则查全部审核中稿子；未传排序字段时默认按创建时间倒序。
-     * 管理端不做可见性过滤（审核工作台就是要看未发布内容）。</p>
+     * （字符串字段模糊、id 类精确），未传排序字段时默认按创建时间倒序。
+     * <b>status 由 DTO 传入（中文文字→枚举码精确匹配），为空则查询全部状态</b>；
+     * 管理端不做可见性过滤（要看的就是包括未发布在内的全部内容）。</p>
      *
      * @param postQueryDTO 查询条件（含分页/排序参数）
-     * @return 待审核稿子的分页结果（PostVO，图片按「审核中」版本回读）
+     * @return 全状态帖子的分页结果（PostVO，图片按帖子当前状态版本回读）
      */
-    IPage<PostVO> listReviewingPosts(PostQueryDTO postQueryDTO);
+    IPage<PostVO> listAdminPosts(PostQueryDTO postQueryDTO);
+
+    /**
+     * 管理员自由设置帖子状态（status / visibility，传哪个改哪个，至少传一个）。
+     *
+     * <p>status 传枚举码（1已发布 2草稿 3审核中 4下架），visibility 传枚举码（1公开 2仅粉丝可见 3私密）。
+     * <b>status 变化时自动联动</b>（保持与审核流口径一致）：</p>
+     * <ul>
+     *   <li>user.postCount / board.postCount 按「仅已发布」口径增减（非发布→已发布 +1，已发布→非发布 -1）；</li>
+     *   <li>auditStatus 同步映射：已发布→通过、下架→驳回、草稿/审核中→待审；</li>
+     *   <li>图片/标签版本归一到新状态：保留变更前状态版本的关联（当前内容），清理其余历史版本（标签回退 useCount）。</li>
+     * </ul>
+     *
+     * @param dto 帖子 id + 待设置的状态/可见性（至少一个非空）
+     */
+    void adminSetPostStatus(AdminPostStatusDTO dto);
 
     /**
      * 发布草稿（草稿箱 → 发布）。按草稿的 {@code draftOfId} 决定去向：
