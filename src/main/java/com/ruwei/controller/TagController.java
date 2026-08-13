@@ -66,7 +66,6 @@ public class TagController {
     /**
      * 新增标签（name 唯一）
      */
-    @SaCheckLogin
     @PostMapping("/add")
     public BaseResponse<TagVO> addTag(@RequestBody TagDTO tagDTO) {
         return ResultUtils.success(tagService.addTag(tagDTO));

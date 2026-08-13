@@ -17,6 +17,7 @@ import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.domain.utils.CountUtils;
 import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
+import com.ruwei.manager.FollowCacheManager;
 import com.ruwei.service.UserFollowService;
 import com.ruwei.mapper.UserFollowMapper;
 import com.ruwei.service.UserService;
@@ -26,10 +27,12 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +55,9 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    private FollowCacheManager followCacheManager;
 
     /**
      * 将入参解析为目标用户的内部主键 id。
@@ -127,7 +133,7 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
                 CountUtils.increment(userService, User::getId, loginId, "fansCount", 1);
             }
             //推送消息
-            eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
+            eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId,FollowEvent.ACTION_FOLLOW));
 
         } else if (one.getStatus() == 2) {
             // 曾关注但已取消，恢复关注
@@ -146,7 +152,7 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
                 CountUtils.increment(userService, User::getId, loginId, "fansCount", 1);
             }
             //推送消息
-            eventPublisher.publishEvent(new FollowEvent(this,loginId,targetId));
+            eventPublisher.publishEvent(new FollowEvent(this, loginId, targetId, FollowEvent.ACTION_FOLLOW));
         } else {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "无法重复关注");
         }
@@ -189,7 +195,8 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
                 CountUtils.increment(userService, User::getId, loginId, "fansCount", -1);
             }
             //推送消息
-            eventPublisher.publishEvent(new FollowEvent(this,id,targetId));
+            eventPublisher.publishEvent(new FollowEvent(this,id,targetId,FollowEvent.ACTION_CANCEL));
+
         } else if (one.getStatus() == 2) {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "已经处于取消关注状态");
         }
@@ -218,12 +225,12 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
     }
 
     /**
-     * 获取我关注的用户列表（分页，按关注时间倒序）。
+     * 获取我关注的用户列表（分页，数据来自 Redis 热索引）。
      * <p>实现要点：
      * <ol>
-     *   <li>先在 {@code userFollow} 表上分页，total = 关注人数，顺序按关注时间倒序；</li>
-     *   <li>用本页的对端 {@code followeeId} 去 {@code user} 表查详情（小集合，无需再分页）；</li>
-     *   <li>复用关系页的 current/size/total 组装最终 VO 页，保证「关注顺序」不被打乱。</li>
+     *   <li>从 {@code uf:following:{loginId}} 取「我关注的人」id 集合（键缺失自动回源 user_follow 表重建）；</li>
+     *   <li>Set 无序，转 List 后按 id 倒序排序保证分页结果稳定可预期（不再是关注时间倒序）；</li>
+     *   <li>内存分页后批量查 {@code user} 表组装 VO。</li>
      * </ol>
      * 全部使用内部 id。
      *
@@ -234,42 +241,34 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
     public IPage<UserVO> getFollowUserList(UserFollowOrFansPageDTO dto) {
         long loginId = StpUtil.getLoginIdAsLong();
 
-        // 1) 在关注关系表上分页（按关注时间倒序），total 即关注人数
-        IPage<UserFollow> followPage = this.page(
-                new Page<>(dto.getCurrent(), dto.getPageSize()),
-                QueryWrapperUtils.getFollowingQueryWrapper(loginId));
+        // 1) 从 Redis 热索引取「我关注的人」id 集合（键缺失自动回源重建）
+        Set<String> idSet = followCacheManager.getFollower(loginId);
 
-        // 2) 取出本页对端用户内部 id（已按 createdAt 倒序）
-        List<Long> followeeIds = followPage.getRecords().stream()
-                .map(UserFollow::getFolloweeId)
+        // 2) 转 Long 并按 id 倒序（Set 无序，排序保证分页结果稳定可预期）
+        List<Long> followeeIds = idSet.stream()
+                .map(Long::valueOf)
+                .sorted(Comparator.reverseOrder())
                 .toList();
 
-        // 3) 查本页用户详情（小集合，不在此处分页），并保持关注顺序
-        List<UserVO> voList;
-        if (followeeIds.isEmpty()) {
-            voList = List.of();
-        } else {
-            List<User> users = userService.list(
-                    QueryWrapperUtils.getUserInIdsQueryWrapper(new UserQueryDTO(), followeeIds));
-            Map<Long, User> userMap = users.stream()
-                    .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
-            voList = followeeIds.stream()
-                    .map(userMap::get)
-                    .filter(Objects::nonNull)
-                    .map(u -> BeanUtil.copyProperties(u, UserVO.class))
-                    .toList();
-        }
+        // 3) 内存分页
+        long total = followeeIds.size();
+        int from = (int) Math.min((dto.getCurrent() - 1) * dto.getPageSize(), total);
+        int to = (int) Math.min(from + dto.getPageSize(), total);
+        List<Long> pageIds = followeeIds.subList(from, to);
 
-        // 4) 复用关系页的分页元数据，组装最终 VO 页
-        IPage<UserVO> result = new Page<>(followPage.getCurrent(), followPage.getSize(), followPage.getTotal());
+        // 4) 批量查本页用户详情并组装 VO
+        List<UserVO> voList = buildUserVOList(pageIds);
+
+        // 5) 组装分页结果
+        IPage<UserVO> result = new Page<>(dto.getCurrent(), dto.getPageSize(), total);
         result.setRecords(voList);
         return result;
     }
 
     /**
-     * 获取我的粉丝列表（分页，按关注时间倒序）。
-     * <p>实现要点与 {@link #getFollowUserList} 一致：先分页 {@code userFollow} 表取本页对端 id，
-     * 再去 {@code user} 表查详情并还原关注顺序，最后复用关系页分页元数据组装 VO 页。全部使用内部 id。</p>
+     * 获取我的粉丝列表（分页，数据来自 Redis 热索引）。
+     * <p>实现要点与 {@link #getFollowUserList} 一致：从 {@code uf:followers:{loginId}} 取粉丝 id 集合
+     * （键缺失自动回源重建），转 List 按 id 倒序后内存分页，再批量查用户组装 VO。全部使用内部 id。</p>
      *
      * @param dto 分页参数（current / pageSize）
      * @return 粉丝用户的分页结果（UserVO）
@@ -278,35 +277,77 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
     public IPage<UserVO> getFansUserList(UserFollowOrFansPageDTO dto) {
         long loginId = StpUtil.getLoginIdAsLong();
 
-        // 1) 在关注关系表上分页（按关注时间倒序），total 即粉丝人数
-        IPage<UserFollow> fansPage = this.page(
-                new Page<>(dto.getCurrent(), dto.getPageSize()),
-                QueryWrapperUtils.getFansQueryWrapper(loginId));
+        // 1) 从 Redis 热索引取粉丝 id 集合（键缺失自动回源重建）
+        Set<String> idSet = followCacheManager.getFollowers(loginId);
 
-        // 2) 取出本页对端（粉丝）用户内部 id（已按 createdAt 倒序）
-        List<Long> followerIds = fansPage.getRecords().stream()
-                .map(UserFollow::getFollowerId)
+        // 2) 转 Long 并按 id 倒序（Set 无序，排序保证分页结果稳定可预期）
+        List<Long> followerIds = idSet.stream()
+                .map(Long::valueOf)
+                .sorted(Comparator.reverseOrder())
                 .toList();
 
-        // 3) 查本页用户详情（小集合，不在此处分页），并保持关注顺序
-        List<UserVO> voList;
-        if (followerIds.isEmpty()) {
-            voList = List.of();
-        } else {
-            List<User> users = userService.list(
-                    QueryWrapperUtils.getUserInIdsQueryWrapper(new UserQueryDTO(), followerIds));
-            Map<Long, User> userMap = users.stream()
-                    .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
-            voList = followerIds.stream()
-                    .map(userMap::get)
-                    .filter(Objects::nonNull)
-                    .map(u -> BeanUtil.copyProperties(u, UserVO.class))
-                    .toList();
-        }
+        // 3) 内存分页
+        long total = followerIds.size();
+        int from = (int) Math.min((dto.getCurrent() - 1) * dto.getPageSize(), total);
+        int to = (int) Math.min(from + dto.getPageSize(), total);
+        List<Long> pageIds = followerIds.subList(from, to);
 
-        // 4) 复用关系页的分页元数据，组装最终 VO 页
-        IPage<UserVO> result = new Page<>(fansPage.getCurrent(), fansPage.getSize(), fansPage.getTotal());
+        // 4) 批量查本页用户详情并组装 VO
+        List<UserVO> voList = buildUserVOList(pageIds);
+
+        // 5) 组装分页结果
+        IPage<UserVO> result = new Page<>(dto.getCurrent(), dto.getPageSize(), total);
         result.setRecords(voList);
         return result;
+    }
+
+    /**
+     * 按内部 id 集合批量查询用户并组装 UserVO（保持入参顺序，过滤已注销/已删除用户）。
+     */
+    private List<UserVO> buildUserVOList(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<User> users = userService.list(
+                QueryWrapperUtils.getUserInIdsQueryWrapper(new UserQueryDTO(), ids));
+        Map<Long, User> userMap = users.stream()
+                .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
+        return ids.stream()
+                .map(userMap::get)
+                .filter(Objects::nonNull)
+                .map(u -> BeanUtil.copyProperties(u, UserVO.class))
+                .toList();
+    }
+
+    /**
+     * 当前登录用户是否关注了目标用户（读 Redis 热索引，键缺失自动回源重建）。
+     */
+    @Override
+    public boolean isFollowed(Long id, Long userId) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        Long targetId = resolveTargetInternalId(id, userId);
+        return Boolean.TRUE.equals(followCacheManager.isFollowing(loginId, targetId));
+    }
+
+    /**
+     * 目标用户是否关注了当前登录用户（即目标用户是不是我的粉丝）。
+     */
+    @Override
+    public boolean isFans(Long id, Long userId) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        Long targetId = resolveTargetInternalId(id, userId);
+        // targetId 是否关注了 loginId
+        return Boolean.TRUE.equals(followCacheManager.isFollower(loginId, targetId));
+    }
+
+    /**
+     * 与目标用户是否互相关注（= 我关注了他 且 他关注了我）。
+     */
+    @Override
+    public boolean isMutual(Long id, Long userId) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        Long targetId = resolveTargetInternalId(id, userId);
+        return Boolean.TRUE.equals(followCacheManager.isFollowing(loginId, targetId))
+                && Boolean.TRUE.equals(followCacheManager.isFollower(loginId, targetId));
     }
 }

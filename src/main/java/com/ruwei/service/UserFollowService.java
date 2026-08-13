@@ -46,4 +46,25 @@ public interface UserFollowService extends IService<UserFollow> {
      */
     IPage<UserVO> getFansUserList(UserFollowOrFansPageDTO userFollowOrFansPageDTO);
 
+    /**
+     * 当前登录用户是否关注了目标用户（读 Redis 热索引，键缺失自动回源重建）。
+     * @param id     目标用户内部主键（与 userId 二选一）
+     * @param userId 目标用户对外编码（与 id 二选一）
+     */
+    boolean isFollowed(Long id, Long userId);
+
+    /**
+     * 目标用户是否关注了当前登录用户（即目标用户是不是我的粉丝）。
+     * @param id     目标用户内部主键（与 userId 二选一）
+     * @param userId 目标用户对外编码（与 id 二选一）
+     */
+    boolean isFans(Long id, Long userId);
+
+    /**
+     * 与目标用户是否互相关注（= 我关注了他 且 他关注了我）。
+     * @param id     目标用户内部主键（与 userId 二选一）
+     * @param userId 目标用户对外编码（与 id 二选一）
+     */
+    boolean isMutual(Long id, Long userId);
+
 }

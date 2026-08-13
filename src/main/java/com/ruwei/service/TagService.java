@@ -68,4 +68,21 @@ public interface TagService extends IService<Tag> {
      * @return 标签 VO 列表（含 useCount / status 字段）
      */
     List<TagVO> listTagsAll();
+
+    /**
+     * 标签查询（用户端）：按名称模糊搜索，仅返回 status=1 正常标签，按使用次数倒序。
+     * keyword 为空时返回全部正常标签（与 {@link #listTags()} 一致）。
+     *
+     * @param keyword 标签名关键字（可选，模糊匹配）
+     * @return 命中的正常标签 VO 列表
+     */
+    List<TagVO> searchTags(String keyword);
+
+    /**
+     * 更改标签状态（启用/禁用，管理员操作）。
+     *
+     * @param id     标签内部主键
+     * @param status 目标状态：1正常 2禁用（仅这两个值合法）
+     */
+    void updateTagStatus(Long id, Integer status);
 }

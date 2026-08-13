@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 关注关系的控制类
  */
@@ -59,5 +62,19 @@ public class UserFollowController {
     public BaseResponse<IPage<UserVO>> getFansUserList(@RequestBody  UserFollowOrFansPageDTO userFollowOrFansPageDTO){
         IPage<UserVO> page = userFollowService.getFansUserList(userFollowOrFansPageDTO);
         return ResultUtils.success(page);
+    }
+
+    /**
+     * 查询当前登录用户与目标用户的关系（读 Redis 热索引，键缺失自动回源重建）
+     * 返回：isFollowed(我是否关注了他) / isFans(他是否关注了我) / isMutual(是否互关)
+     * 入参可传 id（内部主键）或 userId（对外编码），二选一即可
+     */
+    @PostMapping("/getRelation")
+    public BaseResponse<Map<String, Boolean>> getRelation(Long id, Long userId){
+        Map<String, Boolean> relation = new LinkedHashMap<>();
+        relation.put("isFollowed", userFollowService.isFollowed(id, userId));
+        relation.put("isFans", userFollowService.isFans(id, userId));
+        relation.put("isMutual", userFollowService.isMutual(id, userId));
+        return ResultUtils.success(relation);
     }
 }

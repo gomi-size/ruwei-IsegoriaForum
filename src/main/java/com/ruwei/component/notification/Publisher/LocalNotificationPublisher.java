@@ -16,6 +16,9 @@ public class LocalNotificationPublisher implements NotificationPublisher {
 
     private static final String DEST = "/queue/notify";
 
+    /**
+     * 这个地城就是websocket
+     */
     private final SimpMessagingTemplate messagingTemplate;
 
     public LocalNotificationPublisher(SimpMessagingTemplate messagingTemplate) {

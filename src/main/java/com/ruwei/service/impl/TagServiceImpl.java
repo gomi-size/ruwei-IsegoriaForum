@@ -148,4 +148,37 @@ public class TagServiceImpl extends ServiceImpl<TagMapper, Tag>
                 .map(t -> BeanUtil.copyProperties(t, TagVO.class))
                 .toList();
     }
+
+    /**
+     * 标签查询（用户端）：按名称模糊搜索，仅返回 status=1 正常标签，按使用次数倒序；
+     * keyword 为空时返回全部正常标签。
+     */
+    @Override
+    public List<TagVO> searchTags(String keyword) {
+        return lambdaQuery()
+                .eq(Tag::getStatus, 1)
+                .like(StrUtil.isNotBlank(keyword), Tag::getName, keyword)
+                .orderByDesc(Tag::getUseCount)
+                .list().stream()
+                .map(t -> BeanUtil.copyProperties(t, TagVO.class))
+                .toList();
+    }
+
+    /**
+     * 更改标签状态（启用/禁用）：1正常 2禁用，仅这两个值合法；幂等（目标状态相同直接返回）。
+     */
+    @Override
+    public void updateTagStatus(Long id, Integer status) {
+        ThrowUtils.throwIf(id == null || status == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        ThrowUtils.throwIf(status != 1 && status != 2, ErrorCode.PARAMS_ERROR, "非法状态，仅支持 1正常 / 2禁用");
+
+        Tag tag = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(tag), ErrorCode.NOT_FOUND_ERROR, "标签不存在");
+
+        if (status.equals(tag.getStatus())) {
+            return;
+        }
+        boolean updated = lambdaUpdate().eq(Tag::getId, id).set(Tag::getStatus, status).update();
+        ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新失败");
+    }
 }

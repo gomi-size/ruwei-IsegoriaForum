@@ -132,8 +132,6 @@ public class PostController {
         return ResultUtils.success(postService.listPosts(postQueryDTO));
     }
 
-
-
     /**
      * 帖子详情（点进帖子后展示完整内容）。
      *
