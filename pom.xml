@@ -74,15 +74,6 @@
             <artifactId>cos_api</artifactId>
             <version>5.6.227</version>
         </dependency>
-
-        <!--MinIO：与 COS 通过 storage.type 配置切换 -->
-        <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>8.5.17</version>
-        </dependency>
-
-
         <!--https://doc.xiaominfo.com/， knife4j-->
         <dependency>
             <groupId>com.github.xiaoymin</groupId>

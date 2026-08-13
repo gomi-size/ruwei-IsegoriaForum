@@ -15,13 +15,6 @@ cors:
     - http://localhost:3000
     - http://localhost:5173
     - http://127.0.0.1:3000
-
-# ===== 对象存储实现切换 =====
-# cos 或 minio，决定激活哪套存储（CosManager / MinioManager，通过 @ConditionalOnProperty 控制）。
-# 具体凭据放在 gitignored 的 application-local.yml / application-prod.yml 中覆盖。
-storage:
-  type: cos
-
 spring:
   servlet:
     multipart:
@@ -49,7 +42,7 @@ spring:
           min-idle: 0
           max-wait: -1ms
   profiles:
-    active: cos
+    active: local
 
 sa-token:
   token-name: isegoria            # 前端 header / Cookie 统一使用的 key
