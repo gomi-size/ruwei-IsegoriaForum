@@ -74,6 +74,33 @@ public interface PostService extends IService<Post> {
     void updatePostVisibility(Long id, String visibilityText);
 
     /**
+     * 置顶/取消置顶帖子（作者本人操作）。
+     *
+     * <p><b>约束</b>：仅「已发布」（status=1）的帖子可置顶——草稿/审核中/下架本就不对外展示，
+     * 置顶无意义；仅作者本人可操作。置顶标记<b>只在主页场景</b>（按 userId 查询自己/他人帖子列表）
+     * 体现排序，首页信息流 / 关注流不体现。</p>
+     *
+     * <p>幂等：目标置顶状态与当前一致时直接返回成功（避免 update 影响 0 行被误判失败）。</p>
+     *
+     * @param id    帖子内部主键
+     * @param isTop true=置顶 / false=取消置顶
+     */
+    void updatePostTop(Long id, Boolean isTop);
+
+    /**
+     * 设置/取消精华（管理员操作）。
+     *
+     * <p><b>约束</b>：仅「已发布」（status=1）的帖子可设精华，草稿/审核中/下架不对外展示，
+     * 设精华无意义（与置顶口径一致）。管理员权限由 Controller 层 {@code @SaCheckRole("admin")} 保证。</p>
+     *
+     * <p>幂等：目标精华状态与当前一致时直接返回成功。</p>
+     *
+     * @param id        帖子内部主键
+     * @param isEssence true=设为精华 / false=取消精华
+     */
+    void updatePostEssence(Long id, Boolean isEssence);
+
+    /**
      * 删除帖子（逻辑删除 isDelete=1，作者或管理员）：
      * 清理 post_image / post_tag 关联（物理删），关联标签 useCount 回退，板块帖子数 -1。
      *

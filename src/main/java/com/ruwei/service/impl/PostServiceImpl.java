@@ -33,6 +33,7 @@ import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.domain.vo.TagVO;
 import com.ruwei.mapper.PostMapper;
+import com.ruwei.service.AuditlogService;
 import com.ruwei.service.BoardService;
 import com.ruwei.service.PostImageService;
 import com.ruwei.service.PostService;
@@ -48,6 +49,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -96,6 +98,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private AuditlogService auditlogService;
 
     @Resource
     private SensitiveWordFilter sensitiveWordFilter;
@@ -473,6 +478,64 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     }
 
     /**
+     * 置顶/取消置顶帖子（作者本人，仅已发布可置顶）。
+     *
+     * <p>置顶标记只在主页场景（按 userId 查自己/他人帖子列表）体现排序，首页/关注流不体现
+     * （排序在 QueryWrapperUtils.getPostQueryWrapper 内按 userId 条件决定）。</p>
+     */
+    @Override
+    public void updatePostTop(Long id, Boolean isTop) {
+        long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(id == null || isTop == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+
+        Post post = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+        ThrowUtils.throwIf(!Objects.equals(post.getUserId(), loginId), ErrorCode.NO_AUTH_ERROR, "只能置顶自己的帖子");
+        ThrowUtils.throwIf(!PostStatusEnum.PUBLISHED.matches(post.getStatus()),
+                ErrorCode.OPERATION_ERROR, "只有已发布的帖子才能置顶");
+
+        int target = isTop ? 1 : 0;
+        // 幂等：已是目标置顶状态，直接返回（避免 update 影响 0 行被误判为失败）
+        if (post.getIsTop() != null && post.getIsTop() == target) {
+            return;
+        }
+
+        boolean updated = lambdaUpdate()
+                .eq(Post::getId, id)
+                .set(Post::getIsTop, target)
+                .update();
+        ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置置顶失败");
+    }
+
+    /**
+     * 设置/取消精华（管理员，仅已发布可设精华）。
+     *
+     * <p>管理员权限由 Controller 层 {@code @SaCheckRole("admin")} 保证；
+     * 与置顶口径一致，仅「已发布」帖子可设精华。</p>
+     */
+    @Override
+    public void updatePostEssence(Long id, Boolean isEssence) {
+        ThrowUtils.throwIf(id == null || isEssence == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+
+        Post post = getById(id);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+        ThrowUtils.throwIf(!PostStatusEnum.PUBLISHED.matches(post.getStatus()),
+                ErrorCode.OPERATION_ERROR, "只有已发布的帖子才能设为精华");
+
+        int target = isEssence ? 1 : 0;
+        // 幂等：已是目标精华状态，直接返回
+        if (post.getIsEssence() != null && post.getIsEssence() == target) {
+            return;
+        }
+
+        boolean updated = lambdaUpdate()
+                .eq(Post::getId, id)
+                .set(Post::getIsEssence, target)
+                .update();
+        ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置精华失败");
+    }
+
+    /**
      * 删除帖子（逻辑删除 + 关联清理）。
      */
     @Override
@@ -629,6 +692,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             }
             CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", 1);
         }
+
+        // 审核日志落地：记录本次审核的管理员、目标帖子、动作（通过/下架）、说明（与审核状态更新同事务）
+        saveAuditLog(post.getId(), pass, message);
 
         // 「审核中」版本的图片/标签整体迁移为最终状态，并清理该帖其它历史版本（标签同步回退 useCount）
         migrateReviewingRelations(id, finalStatus.getCode());
@@ -1238,6 +1304,25 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .eq(PostTag::getPostId, postId)
                 .eq(PostTag::getStatus, status));
         bindTags(postId, tags, status);
+    }
+
+    /**
+     * 审核日志落地：记录管理员对目标帖子的审核动作。
+     *
+     * <p>字段语义（对齐 auditLog 表）：targetType=1 帖子；action 1通过 2下架 3删除——
+     * 审核流只有「通过」与「驳回(下架)」两种，故 action 取 1/2；remark 存拒绝原因/说明。
+     * 管理员 id 取当前登录态（Controller 已用 @SaCheckRole("admin") 保证），
+     * 与审核状态更新在同一事务内，任一失败整体回滚。</p>
+     */
+    private void saveAuditLog(Long postId, boolean pass, String remark) {
+        Auditlog log = new Auditlog();
+        log.setAdminId(StpUtil.getLoginIdAsLong());
+        log.setTargetType(1);
+        log.setTargetId(postId);
+        log.setAction(pass ? 1 : 2);
+        log.setRemark(remark);
+        log.setCreatedAt(new Date());
+        auditlogService.save(log);
     }
 
     /**

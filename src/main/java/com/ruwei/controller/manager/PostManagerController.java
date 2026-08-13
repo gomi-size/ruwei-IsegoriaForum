@@ -43,6 +43,21 @@ public class PostManagerController {
     }
 
     /**
+     * 设置/取消帖子精华（管理员操作）。
+     *
+     * <p><b>约束</b>：仅「已发布」的帖子可设为精华，草稿/审核中/下架不对外展示，设精华无意义。</p>
+     *
+     * @param postId    帖子内部主键
+     * @param isEssence true=设为精华 / false=取消精华
+     */
+    @PostMapping("/essence")
+    public BaseResponse<String> updatePostEssence(@RequestParam Long postId, @RequestParam Boolean isEssence) {
+        ThrowUtils.throwIf(postId == null || isEssence == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.updatePostEssence(postId, isEssence);
+        return ResultUtils.success(isEssence ? "已设为精华" : "已取消精华");
+    }
+
+    /**
      * 管理员帖子列表（全状态可查：已发布/草稿/审核中/下架），分页查询。
      *
      * <p>条件与用户列表一致：id / postCode / boardId / title / userId / createdAt

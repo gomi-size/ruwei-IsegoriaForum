@@ -214,15 +214,6 @@ CREATE TABLE `sensitive_word` (
 #     旧库未建，直接执行上方对应的 CREATE TABLE。
 # ============================================================
 
-# 1. board 表：下划线列 → 驼峰列（与 Board 实体字段对齐）
-ALTER TABLE `board`
-    RENAME COLUMN `creator_id` TO `creatorId`,
-    RENAME COLUMN `follow_count` TO `followCount`,
-    RENAME COLUMN `post_count` TO `postCount`,
-    RENAME COLUMN `level_rule` TO `levelRule`,
-    RENAME COLUMN `created_at` TO `createdAt`,
-    RENAME COLUMN `updated_at` TO `updatedAt`;
-
 # 2. board_follow 表：下划线列 → 驼峰列 + 补 status
 ALTER TABLE `board_follow`
     RENAME COLUMN `created_at` TO `createdAt`,
@@ -232,3 +223,16 @@ ALTER TABLE `board_follow`
 ALTER TABLE `post`
     ADD COLUMN `draftOfId` BIGINT DEFAULT NULL COMMENT '草稿来源帖id(null=新建草稿)' AFTER `isDelete`,
     ADD KEY `idxDraft` (`userId`,`draftOfId`);
+
+# 审核行为日志表，同步落地
+CREATE TABLE `auditLog` (
+                            `id` BIGINT NOT NULL AUTO_INCREMENT,
+                            `adminId` BIGINT NOT NULL,
+                            `targetType` TINYINT NOT NULL COMMENT '1帖子 2评论',
+                            `targetId` BIGINT NOT NULL,
+                            `action` TINYINT NOT NULL COMMENT '1通过 2下架 3删除',
+                            `remark` VARCHAR(255) DEFAULT '' COMMENT '审核操作的补充说明，例如拒绝原因、下架理由等',
+                            `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            PRIMARY KEY (`id`),
+                            KEY `idxTarget` (`targetType`,`targetId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审核日志表';

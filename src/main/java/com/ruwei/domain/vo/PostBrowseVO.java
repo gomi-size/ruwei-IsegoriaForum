@@ -87,6 +87,11 @@ public class PostBrowseVO implements Serializable {
     private Integer isTop;
 
     /**
+     * 精华
+     */
+    private Integer isEssence;
+
+    /**
      * 发布时间
      */
     private Date createdAt;

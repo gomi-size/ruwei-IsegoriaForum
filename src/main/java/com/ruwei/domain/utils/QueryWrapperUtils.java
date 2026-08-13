@@ -271,7 +271,9 @@ public class QueryWrapperUtils {
      * <b>可见性/状态过滤</b>：{@code visibility}（公开/仅粉丝可见/私密）与 {@code status}
      * （已发布/草稿/审核中/下架）传<b>中文文字</b>，经对应枚举转整数后精确匹配；<b>为空则查询所有</b>，
      * 非法文字抛参数错误。其余条件均不传则查询全部。
-     * 排序走 {@link #POST_ALLOWED_SORT_FIELDS} 白名单；未传排序字段时默认按 {@code createdAt} 倒序（最新在前）。</p>
+     * 排序走 {@link #POST_ALLOWED_SORT_FIELDS} 白名单；未传排序字段时默认按 {@code createdAt} 倒序（最新在前）；
+     * <b>主页场景</b>（按 {@code userId} 查询）未传排序字段时改为「置顶优先」：{@code isTop DESC, createdAt DESC}，
+     * 使置顶仅在个人/他人主页查看帖子时体现，首页信息流不体现。</p>
      *
      * <p><b>注意</b>：本方法只按入参条件过滤，不做「默认可见性」兜底（status=已发布 的追加由
      * 调用方 PostService 根据「是否查本人」决定）；status 条件与调用方追加条件为 AND 叠加
@@ -335,8 +337,14 @@ public class QueryWrapperUtils {
         // 排序：常量在前比较，避免 sortOrder 为 null 时空指针；列名走白名单防注入
         boolean isAsc = "ascend".equals(sortOrder);
         boolean canSort = StrUtil.isNotBlank(sortField) && POST_ALLOWED_SORT_FIELDS.contains(sortField);
+        // 主页场景：仅当按 userId 查询（点进自己/他人主页看帖子）时，置顶帖优先展示；
+        // 首页信息流（不传 userId）/ 关注流不体现置顶
+        boolean profileView = ObjUtil.isNotNull(userId) && userId != 0;
         if (canSort) {
             queryWrapper.orderBy(true, isAsc, sortField);
+        } else if (profileView) {
+            // 主页：置顶帖在前，再按创建时间倒序（最新在前）
+            queryWrapper.orderByDesc("isTop").orderByDesc("createdAt");
         } else {
             // 默认按创建时间倒序（最新在前）
             queryWrapper.orderByDesc("createdAt");

@@ -71,6 +71,23 @@ public class PostController {
     }
 
     /**
+     * 置顶/取消置顶帖子（作者本人操作）。
+     *
+     * <p><b>约束</b>：仅「已发布」的帖子可置顶；仅作者本人可操作。
+     * 置顶标记只在主页（个人/他人主页，即列表接口传 userId 查询某人帖子）体现排序，
+     * 首页信息流 / 关注流不体现。</p>
+     *
+     * @param id    帖子内部主键
+     * @param isTop true=置顶 / false=取消置顶
+     */
+    @PostMapping("/top")
+    public BaseResponse<String> updatePostTop(@RequestParam Long id, @RequestParam Boolean isTop) {
+        ThrowUtils.throwIf(id == null || isTop == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.updatePostTop(id, isTop);
+        return ResultUtils.success(isTop ? "置顶成功" : "已取消置顶");
+    }
+
+    /**
      * 删除帖子（逻辑删除 isDelete=1，作者或管理员）
      */
     @DeleteMapping("/{id}")
