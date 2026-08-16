@@ -32,10 +32,12 @@ public class EsSearchService {
     /**
      * 帖子搜索。
      *
-     * <p>匹配逻辑（keyword 非空时二者取 OR，至少命中其一）：</p>
+     * <p>匹配逻辑（keyword 非空时三条件取 OR，至少命中其一）：</p>
      * <ol>
      *   <li><b>整词匹配</b>：multiMatch 多字段 title / plainText / tagNames / <b>nickname</b>
      *       （搜用户昵称可命中其公开帖子，如系统默认昵称 {@code ISEGORIA_xxxxxx}）；</li>
+     *   <li><b>标题子串模糊</b>：wildcard 对 title 字段做 {@code *keyword*} 任意位置通配，
+     *       等效 SQL LIKE %kw%，解决单字/词片段（如「越」→「越狱」）搜不到的问题；</li>
      *   <li><b>昵称子串模糊</b>：wildcard 对 nickname 字段做 {@code *keyword*} 任意位置通配
      *       （IK 分词产出小写 token，查询串统一小写 + 转义通配符），
      *       支持输入半截昵称（如 {@code GhTq}）也能命中。</li>
@@ -58,7 +60,7 @@ public class EsSearchService {
                         b.filter(f -> f.term(t -> t.field("type").value(type)));
                     }
                     if (StrUtil.isNotBlank(keyword)) {
-                        // 昵称子串通配：小写化（索引 token 为小写）+ 转义 wildcard 特殊字符（\ * ?）
+                        // 转义 wildcard 特殊字符（\ * ?），小写化对齐 IK 英文 token
                         String escaped = keyword.toLowerCase(Locale.ROOT)
                                 .replace("\\", "\\\\")
                                 .replace("*", "\\*")
@@ -67,6 +69,9 @@ public class EsSearchService {
                                 .should(sh -> sh.multiMatch(mm -> mm
                                         .fields("title", "plainText", "tagNames", "nickname")
                                         .query(keyword)))
+                                // 标题子串模糊：等效 LIKE %kw%，解决单字/词片段搜不到（如「越」→「越狱」）
+                                .should(sh -> sh.wildcard(w -> w.field("title").value("*" + escaped + "*")))
+                                // 昵称子串模糊：支持输入半截昵称
                                 .should(sh -> sh.wildcard(w -> w.field("nickname").value("*" + escaped + "*")))
                                 .minimumShouldMatch("1")));
                     }
