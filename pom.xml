@@ -65,7 +65,7 @@
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
-            <version>5.8.26</version> <!-- 建议根据需要使用最新稳定版本 -->
+            <version>5.8.37</version> <!-- 升级自 5.8.26：修复 JDK 17 下 JSON/反射的 InaccessibleObjectException -->
         </dependency>
 
         <!--COS-->
@@ -103,6 +103,12 @@
             <scope>provided</scope>
         </dependency>
 
+        <!--es-->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+
 
     </dependencies>
     <dependencyManagement>
@@ -114,11 +120,12 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Sa-Token BOM：锁定所有 sa-token-* 模块为同一版本，避免 starter 与 redis-jackson 版本不一致导致 NoSuchFieldError -->
+            <!-- Sa-Token BOM：锁定所有 sa-token-* 模块为同一版本，避免 starter 与 redis-jackson 版本不一致导致 NoSuchFieldError。
+                 1.41.0 起修复 JDK 17 下 redis-jackson 序列化会话时的反射兼容问题（InaccessibleObjectException） -->
             <dependency>
                 <groupId>cn.dev33</groupId>
                 <artifactId>sa-token-dependencies</artifactId>
-                <version>1.40.0</version>
+                <version>1.41.0</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -145,6 +152,17 @@
                 <configuration>
                     <mainClass>com.ruwei.IsegoriaForumApplication</mainClass>
                     <skip>true</skip>
+                    <!-- JDK 17 强封装(JPMS)下，序列化库(Sa-Token/Hutool/springdoc)反射访问
+                         java.util 等包内部字段会被拒绝，需显式 add-opens 参数。
+                         注意：该配置仅对 mvn spring-boot:run 生效；IDE 直接启动时
+                         需在 Run Configuration 的 VM options 里加同样参数。 -->
+                    <jvmArguments>
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.io=ALL-UNNAMED
+                        --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens java.base/java.math=ALL-UNNAMED
+                    </jvmArguments>
                 </configuration>
                 <executions>
                     <execution>

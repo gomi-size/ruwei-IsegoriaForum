@@ -1,6 +1,6 @@
 package com.ruwei.manager;
 
-import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.mapper.UserFollowMapper;
@@ -140,7 +140,7 @@ public class FollowCacheManager {
             lambdaQueryWrapper.eq(UserFollow::getFolloweeId,uid).eq(UserFollow::getStatus,1).select(UserFollow::getFollowerId);
         }
         List<UserFollow> userFollows = userFollowMapper.selectList(lambdaQueryWrapper);
-        if(BeanUtil.isEmpty(userFollows)){
+        if(CollUtil.isEmpty(userFollows)){
             // 空集也建键并设 TTL，避免每次读都回源打 DB（防空穿透）
             redis.opsForSet().add(key, "-1");
             redis.expire(key, TTL);

@@ -236,3 +236,5 @@ CREATE TABLE `auditLog` (
                             PRIMARY KEY (`id`),
                             KEY `idxTarget` (`targetType`,`targetId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审核日志表';
+
+
