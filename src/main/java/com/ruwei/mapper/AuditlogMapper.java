@@ -1,4 +1,4 @@
-package com.ruwei.manager;
+package com.ruwei.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ruwei.domain.empty.Auditlog;

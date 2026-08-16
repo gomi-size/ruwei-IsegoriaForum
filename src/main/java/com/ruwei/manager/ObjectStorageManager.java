@@ -4,8 +4,8 @@ import java.io.File;
 import java.io.InputStream;
 
 /**
- * 对象存储抽象接口：COS 与 MinIO 的统一入口。
- * 通过 yml 中 storage.type=cos|minio 决定激活哪个实现（见各实现类上的 @ConditionalOnProperty）。
+ * 对象存储抽象接口。
+ * 当前唯一实现为 {@link CosManager}，通过 yml 中 storage.type=cos 激活（见实现类上的 @ConditionalOnProperty）。
  */
 public interface ObjectStorageManager {
 

@@ -1,4 +1,4 @@
-package com.ruwei.controller;
+package com.ruwei.controller.manager;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
@@ -18,21 +18,12 @@ import org.springframework.web.bind.annotation.*;
  * 贴吧板块
  */
 @RestController
-@RequestMapping("/boards")
-public class BoardController {
+@RequestMapping("/admin/boards")
+public class BoardManagerController {
 
     @Resource
     private BoardService boardService;
 
-    /**
-     * 创建板块（创建者为吧主）
-     */
-    @PostMapping("/add")
-    @SaCheckLogin
-    public BaseResponse<Board> createBoard(@RequestBody CreateBoardDTO createBoardDTO) {
-        Board board = boardService.createBoard(createBoardDTO);
-        return ResultUtils.success(board);
-    }
 
     /**
      * 编辑板块信息（吧主/管理员）
@@ -58,16 +49,6 @@ public class BoardController {
     }
 
     /**
-     * 吧主删除自己创建的板块（逻辑删除：isDelete=1，数据保留可恢复）
-     */
-    @DeleteMapping("/{id}")
-    @SaCheckLogin
-    public BaseResponse<String> deleteBoardByCreator(@PathVariable Long id) {
-        boardService.deleteBoardByCreator(id);
-        return ResultUtils.success("删除成功");
-    }
-
-    /**
      * 管理员封禁板块（status=2，可恢复，不触发逻辑删除）
      */
     @DeleteMapping("/{id}/ban")
@@ -86,7 +67,4 @@ public class BoardController {
         boardService.deleteBoardByAdmin(id);
         return ResultUtils.success("删除成功");
     }
-
-
-
 }

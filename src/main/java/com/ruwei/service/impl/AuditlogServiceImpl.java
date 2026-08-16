@@ -4,7 +4,7 @@ package com.ruwei.service.impl;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 
 import com.ruwei.domain.empty.Auditlog;
-import com.ruwei.manager.AuditlogMapper;
+import com.ruwei.mapper.AuditlogMapper;
 import com.ruwei.service.AuditlogService;
 import org.springframework.stereotype.Service;
 
