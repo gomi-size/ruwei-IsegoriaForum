@@ -11,9 +11,9 @@ import java.util.Date;
  * 帖子<b>列表</b>展示 VO（简洁卡片，供帖子列表页 / 首页信息流使用）。
  *
  * <p><b>与 {@link PostVO}（详情）的分工</b>：列表只给前端渲染卡片所需的轻量字段
- * （标题、封面、作者昵称/头像、计数、时间等），<b>不含正文 content / 图片全列表 imageUrl /
- * 话题 topic / 可见性/状态等详情信息</b>；用户点击进入帖子后，由详情接口
- * {@code GET /post/{id}} 返回完整的 {@link PostVO}。</p>
+ * （标题、封面、正文摘要、作者昵称/头像、计数、时间等），<b>不含完整正文 content /
+ * 图片全列表 imageUrl / 话题 topic / 可见性/状态等详情信息</b>；用户点击进入帖子后，
+ * 由详情接口 {@code GET /post/{id}} 返回完整的 {@link PostVO}。</p>
  *
  * <p>作者信息（{@code userNickname} / {@code userAvatar}）由 Service 层批量查 user 表装配，
  * 不冗余存储于 post 表。</p>
@@ -55,6 +55,12 @@ public class PostBrowseVO implements Serializable {
      * 封面图URL
      */
     private String cover;
+
+    /**
+     * 预览正文（正文前 N 字符截断的摘要，供列表卡片两行内展示；
+     * 由 Service 层查询时截取填充，不冗余存储于 post 表）
+     */
+    private String contentPreview;
 
     /**
      * 内容形态: 1图文 2视频 3纯文

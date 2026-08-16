@@ -86,6 +86,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     /** postCode 自增起始基准 */
     private static final long POST_CODE_BASE = 100000L;
 
+    /** 列表卡片预览正文最大字符数（超出截断并追加省略号） */
+    private static final int PREVIEW_MAX_LENGTH = 100;
+
     @Resource
     private PostImageService postImageService;
 
@@ -1073,12 +1076,56 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             return null;
         }
         PostBrowseVO vo = BeanUtil.copyProperties(post, PostBrowseVO.class);
+        vo.setContentPreview(buildContentPreview(post.getContent()));
         User author = userMap == null ? null : userMap.get(post.getUserId());
         if (author != null) {
             vo.setUserNickname(author.getNickname());
             vo.setUserAvatar(author.getAvatar());
         }
         return vo;
+    }
+
+    /**
+     * 抽取正文纯文本并截断为列表卡片预览摘要。
+     *
+     * <p>新数据 {@code content} 为 ContentBlock 的 JSON 数组，拼接各文本块（p / heading）的
+     * {@code text}；旧数据为纯文本，直接使用。统一截断到 {@value #PREVIEW_MAX_LENGTH} 字符
+     * （超出追加省略号），无文本返回 null（前端可降级显示封面图）。</p>
+     *
+     * @param content 帖子正文字段（JSON 块数组或纯文本，可空）
+     * @return 预览正文（无内容返回 null）
+     */
+    private String buildContentPreview(String content) {
+        if (StrUtil.isBlank(content)) {
+            return null;
+        }
+        String plain = content.trim();
+        // 新数据：content 是以 '[' 开头的 JSON 数组，提取各文本块 text 拼接
+        if (plain.startsWith("[")) {
+            try {
+                List<ContentBlock> blocks = JSONUtil.toList(JSONUtil.parseArray(content), ContentBlock.class);
+                StringBuilder sb = new StringBuilder();
+                for (ContentBlock b : blocks) {
+                    if (StrUtil.isNotBlank(b.getText())) {
+                        if (sb.length() > 0) {
+                            sb.append(' ');
+                        }
+                        sb.append(b.getText().trim());
+                    }
+                }
+                plain = sb.toString();
+            } catch (Exception ignored) {
+                // 解析失败（脏数据），fallback 到下方纯文本截断
+            }
+        }
+        if (StrUtil.isBlank(plain)) {
+            return null;
+        }
+        // 截断：超过 PREVIEW_MAX_LENGTH 字符时追加省略号
+        if (plain.length() > PREVIEW_MAX_LENGTH) {
+            return StrUtil.sub(plain, 0, PREVIEW_MAX_LENGTH) + "...";
+        }
+        return plain;
     }
 
     /**

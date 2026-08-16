@@ -20,6 +20,7 @@ import jakarta.annotation.Resource;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Slf4j
 @Service
@@ -30,6 +31,15 @@ public class EsSearchService {
 
     /**
      * 帖子搜索。
+     *
+     * <p>匹配逻辑（keyword 非空时二者取 OR，至少命中其一）：</p>
+     * <ol>
+     *   <li><b>整词匹配</b>：multiMatch 多字段 title / plainText / tagNames / <b>nickname</b>
+     *       （搜用户昵称可命中其公开帖子，如系统默认昵称 {@code ISEGORIA_xxxxxx}）；</li>
+     *   <li><b>昵称子串模糊</b>：wildcard 对 nickname 字段做 {@code *keyword*} 任意位置通配
+     *       （IK 分词产出小写 token，查询串统一小写 + 转义通配符），
+     *       支持输入半截昵称（如 {@code GhTq}）也能命中。</li>
+     * </ol>
      *
      * @param keyword 关键词（可为空，空则按条件浏览）
      * @param boardId 板块过滤（可空）
@@ -48,9 +58,17 @@ public class EsSearchService {
                         b.filter(f -> f.term(t -> t.field("type").value(type)));
                     }
                     if (StrUtil.isNotBlank(keyword)) {
-                        b.must(m -> m.multiMatch(mm -> mm
-                                .fields("title", "plainText", "tagNames")
-                                .query(keyword)));
+                        // 昵称子串通配：小写化（索引 token 为小写）+ 转义 wildcard 特殊字符（\ * ?）
+                        String escaped = keyword.toLowerCase(Locale.ROOT)
+                                .replace("\\", "\\\\")
+                                .replace("*", "\\*")
+                                .replace("?", "\\?");
+                        b.must(m -> m.bool(mb -> mb
+                                .should(sh -> sh.multiMatch(mm -> mm
+                                        .fields("title", "plainText", "tagNames", "nickname")
+                                        .query(keyword)))
+                                .should(sh -> sh.wildcard(w -> w.field("nickname").value("*" + escaped + "*")))
+                                .minimumShouldMatch("1")));
                     }
                     return b;
                 }))
@@ -58,7 +76,12 @@ public class EsSearchService {
                 .withHighlightQuery(buildHighlight())
                 .build();
 
+        /*long start = System.currentTimeMillis();*/
         SearchHits<PostDoc> hits = operations.search(query, PostDoc.class);
+/*
+        log.info("ES 搜索 keyword={} boardId={} type={} sort={} 命中 {} 条，耗时 {}ms",
+                keyword, boardId, type, sort, hits.getTotalHits(), System.currentTimeMillis() - start);
+*/
 
         List<PostBrowseVO> list = new ArrayList<>();
         for (SearchHit<PostDoc> hit : hits) {
@@ -67,6 +90,11 @@ public class EsSearchService {
             List<String> titleHL = hit.getHighlightField("title");
             if (titleHL != null && !titleHL.isEmpty()) {
                 vo.setTitle(titleHL.get(0));
+            }
+            // 高亮片段覆盖预览正文（命中上下文片段，天然即摘要，且保留 <em> 命中标记）
+            List<String> plainHL = hit.getHighlightField("plainText");
+            if (plainHL != null && !plainHL.isEmpty()) {
+                vo.setContentPreview(plainHL.get(0));
             }
             list.add(vo);
         }
@@ -107,6 +135,8 @@ public class EsSearchService {
         vo.setUserAvatar(d.getAvatar());
         vo.setTitle(d.getTitle());
         vo.setCover(d.getCover());
+        // 默认预览正文：ES 纯文本字段截断（命中关键词时上方用高亮片段覆盖）
+        vo.setContentPreview(StrUtil.maxLength(d.getPlainText(), 100));
         vo.setType(d.getType());
         vo.setLikeCount(d.getLikeCount());
         vo.setCommentCount(d.getCommentCount());
