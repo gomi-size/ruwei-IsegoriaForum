@@ -32,6 +32,8 @@ import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.domain.vo.PostVO;
 import com.ruwei.domain.vo.TagVO;
+import com.ruwei.es.event.PostIndexEvent;
+import com.ruwei.es.service.EsPostSyncService;
 import com.ruwei.mapper.PostMapper;
 import com.ruwei.service.AuditlogService;
 import com.ruwei.service.BoardService;
@@ -113,6 +115,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    private EsPostSyncService esPostSyncService;
 
     /**
      * 创建帖子（送审）。返回对外展示的 {@link PostVO}（枚举字段回显文字、雪花 id 转字符串）。
@@ -443,6 +448,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         if (topicTags != null) {
             rebuildTags(post.getId(), topicTags, PostStatusEnum.REVIEWING.getCode());
         }
+        // 编辑即下架送审：原帖若在索引中，先删除，审核通过后由 auditPost 重新索引
+        eventPublisher.publishEvent(new PostIndexEvent(this, post.getId(), PostIndexEvent.Action.DELETE));
         return ResultUtils.success("修改成功，已提交审核");
     }
 
@@ -475,6 +482,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .set(Post::getVisibility, target.getCode())
                 .update();
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置可见性失败");
+
+        // 可见性变更同步 ES：设私密/仅粉丝→删除；设公开且已发布→索引
+        syncPostToEs(id);
     }
 
     /**
@@ -505,6 +515,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .set(Post::getIsTop, target)
                 .update();
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置置顶失败");
+
+        // 置顶变更同步 ES：刷新索引中的 isTop
+        syncPostToEs(id);
     }
 
     /**
@@ -533,6 +546,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .set(Post::getIsEssence, target)
                 .update();
         ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "设置精华失败");
+
+        // 精华变更同步 ES：刷新索引中的 isEssence
+        syncPostToEs(id);
     }
 
     /**
@@ -571,6 +587,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             }
             CountUtils.increment(userService, User::getId, post.getUserId(), "postCount", -1);
         }
+
+        // 逻辑删除同步 ES：从索引删除
+        eventPublisher.publishEvent(new PostIndexEvent(this, id, PostIndexEvent.Action.DELETE));
     }
 
     /**
@@ -713,6 +732,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }else{
             eventPublisher.publishEvent(new AdminEvent(this, id, post.getUserId(), message));
         }
+        // 审核结果同步 ES：通过且公开→索引，驳回/私密→删除
+        syncPostToEs(id);
     }
 
     /**
@@ -943,6 +964,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         if (statusChanged) {
             migratePostRelations(post.getId(), post.getStatus(), dto.getStatus());
         }
+        // 状态/可见性变更同步 ES：恢复发布→索引，下架/私密→删除
+        syncPostToEs(post.getId());
     }
 
     /**
@@ -1386,5 +1409,20 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .eq(PostTag::getStatus, sourceStatus)
                 .set(PostTag::getStatus, finalStatus)
                 .update();
+    }
+
+    /**
+     * 帖子状态变更后同步 ES：满足索引条件（已发布+审核通过+公开+未删除）发 INDEX，否则发 DELETE。
+     * 事件由 PostIndexEventListener 异步消费（事务提交后执行），不阻塞主流程。
+     */
+    private void syncPostToEs(Long postId) {
+        if (postId == null) {
+            return;
+        }
+        Post p = getById(postId);
+        PostIndexEvent.Action action = (p != null && esPostSyncService.shouldIndex(p))
+                ? PostIndexEvent.Action.INDEX
+                : PostIndexEvent.Action.DELETE;
+        eventPublisher.publishEvent(new PostIndexEvent(this, postId, action));
     }
 }
