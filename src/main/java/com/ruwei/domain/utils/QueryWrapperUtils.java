@@ -8,10 +8,12 @@ import com.ruwei.exception.BusinessException;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
+import com.ruwei.domain.dto.AuditlogQueryDTO;
 import com.ruwei.domain.dto.BoardQueryDTO;
 import com.ruwei.domain.dto.NotificationQueryDTO;
 import com.ruwei.domain.dto.PostQueryDTO;
 import com.ruwei.domain.dto.UserQueryDTO;
+import com.ruwei.domain.empty.Auditlog;
 import com.ruwei.domain.empty.Board;
 import com.ruwei.domain.empty.BoardFollow;
 import com.ruwei.domain.empty.Notification;
@@ -345,6 +347,61 @@ public class QueryWrapperUtils {
         } else if (profileView) {
             // 主页：置顶帖在前，再按创建时间倒序（最新在前）
             queryWrapper.orderByDesc("isTop").orderByDesc("createdAt");
+        } else {
+            // 默认按创建时间倒序（最新在前）
+            queryWrapper.orderByDesc("createdAt");
+        }
+        return queryWrapper;
+    }
+
+    /**
+     * 允许参与排序的字段白名单（防止 orderBy 注入任意列名）。
+     * 与 auditLog 表驼峰列名保持一致。
+     */
+    private static final Set<String> AUDITLOG_ALLOWED_SORT_FIELDS = Set.of(
+            "id", "adminId", "targetType", "targetId", "action", "createdAt"
+    );
+
+    /**
+     * 根据查询条件构造审核日志表的 QueryWrapper。
+     *
+     * <p>精确匹配：{@code id} / {@code adminId} / {@code targetType} / {@code targetId} / {@code action}；
+     * 模糊匹配：{@code remark} / {@code createdAt}（datetime 列 LIKE，传 "2026-08-05" 可查当天）。
+     * 排序走 {@link #AUDITLOG_ALLOWED_SORT_FIELDS} 白名单；未传排序字段时默认按 {@code createdAt} 倒序（最新在前）。</p>
+     *
+     * @param auditlogQueryDTO 查询条件，为 null 时抛参数异常
+     * @return 已拼好条件的 QueryWrapper（作用在 auditLog 表）
+     */
+    public static QueryWrapper<Auditlog> getAuditlogQueryWrapper(AuditlogQueryDTO auditlogQueryDTO) {
+        if (auditlogQueryDTO == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
+        }
+        Long id = auditlogQueryDTO.getId();
+        Long adminId = auditlogQueryDTO.getAdminId();
+        Integer targetType = auditlogQueryDTO.getTargetType();
+        Long targetId = auditlogQueryDTO.getTargetId();
+        Integer action = auditlogQueryDTO.getAction();
+        String remark = auditlogQueryDTO.getRemark();
+        String createdAt = auditlogQueryDTO.getCreatedAt();
+        String sortField = auditlogQueryDTO.getSortField();
+        String sortOrder = auditlogQueryDTO.getSortOrder();
+
+        QueryWrapper<Auditlog> queryWrapper = new QueryWrapper<>();
+        // 精确匹配（列名与 auditLog 表驼峰列一致）
+        queryWrapper.eq(ObjUtil.isNotNull(id) && id != 0, "id", id);
+        queryWrapper.eq(ObjUtil.isNotNull(adminId) && adminId != 0, "adminId", adminId);
+        queryWrapper.eq(ObjUtil.isNotNull(targetType), "targetType", targetType);
+        queryWrapper.eq(ObjUtil.isNotNull(targetId) && targetId != 0, "targetId", targetId);
+        queryWrapper.eq(ObjUtil.isNotNull(action), "action", action);
+        // 模糊匹配
+        queryWrapper.like(StrUtil.isNotBlank(remark), "remark", remark);
+        queryWrapper.like(StrUtil.isNotBlank(createdAt), "createdAt", createdAt);
+
+        // 排序：常量在前比较，避免 sortOrder 为 null 时空指针；列名走白名单防注入
+        boolean isAsc = "ascend".equals(sortOrder);
+        boolean canSort = StrUtil.isNotBlank(sortField) && AUDITLOG_ALLOWED_SORT_FIELDS.contains(sortField);
+        if (canSort) {
+            queryWrapper.orderBy(true, isAsc, sortField);
         } else {
             // 默认按创建时间倒序（最新在前）
             queryWrapper.orderByDesc("createdAt");

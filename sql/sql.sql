@@ -238,3 +238,23 @@ CREATE TABLE `auditLog` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审核日志表';
 
 
+#评论
+CREATE TABLE `comment` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(代码层雪花ASSIGN_ID, DB自增仅兜底)',
+  `postId` BIGINT NOT NULL COMMENT '帖子内部id',
+  `userId` BIGINT NOT NULL COMMENT '评论者内部id',
+  `parentId` BIGINT NOT NULL DEFAULT 0 COMMENT '父评论id: 0=一级评论, 二级回复一律指向顶层评论(含楼中楼互评)',
+  `replyToUserId` BIGINT DEFAULT NULL COMMENT '被回复用户内部id',
+  `content` VARCHAR(1000) NOT NULL COMMENT '评论内容(发布时过敏感词 filter: 替换则存替换后文本, 拦截则拒绝)',
+  `likeCount` INT DEFAULT 0 COMMENT '点赞数(CountUtils原子增减)',
+  `replyCount` INT DEFAULT 0 COMMENT '子回复数(仅顶层评论有意义, 只统计status=1)',
+  `status` TINYINT DEFAULT 1 COMMENT '1正常 2已删除(软删, 列表需展示"已删除"占位)',
+  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  PRIMARY KEY (`id`),
+  KEY `idxPostParent` (`postId`,`parentId`,`createdAt`),
+  KEY `idxParent` (`parentId`),
+  KEY `idxUser` (`userId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(两级盖楼)';
+
+
