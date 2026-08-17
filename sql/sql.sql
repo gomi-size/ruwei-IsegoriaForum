@@ -257,4 +257,12 @@ CREATE TABLE `comment` (
   KEY `idxUser` (`userId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(两级盖楼)';
 
+CREATE TABLE `comment_like` (
+                                `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(雪花)',
+                                `commentId` BIGINT NOT NULL COMMENT '评论内部id',
+                                `userId` BIGINT NOT NULL COMMENT '点赞者内部id',
+                                `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `ukCommentUser` (`commentId`,`userId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论点赞表';
 

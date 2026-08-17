@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.mapper.UserFollowMapper;
 import jakarta.annotation.Resource;
+import org.apache.ibatis.annotations.Mapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +19,7 @@ import java.util.Set;
  * 读优先 Redis，键缺失时回源 user_follow 表重建（懒加载，无需迁移脚本）。
  * 写路径由事件监听器在事务提交后调用（见 FollowRedisEventListener）。
  */
-@Component
+@Mapper
 public class FollowCacheManager {
 
     //设置key
