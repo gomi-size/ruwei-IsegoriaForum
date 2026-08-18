@@ -5,9 +5,9 @@ import lombok.Data;
 @Data
 public class CommentAddDTO {
     /**
-     * 必填, 帖子对外编码 → 解析内部 postId
+     * 必填, 帖子对外编码(post.postCode, 如 P100001) → Service 层解析内部 postId
      */
-    private Long postCode;
+    private String postCode;
 
     /**
      * 必填, trim 后非空, ≤1000

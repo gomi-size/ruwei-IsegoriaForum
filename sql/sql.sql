@@ -183,6 +183,7 @@ CREATE TABLE `notification` (
                                 `type` TINYINT DEFAULT NULL COMMENT '1点赞 2评论 3回复 4关注 5@提及 6系统 7收藏',
                                 `targetType` TINYINT DEFAULT NULL COMMENT '1帖子 2用户 3板块',
                                 `targetId` BIGINT DEFAULT NULL COMMENT '关联对象内部id',
+                                `commentId` BIGINT DEFAULT NULL COMMENT '评论内部id(评论/回复通知跳转锚点, 前端定位楼中楼评论)',
                                 `content` VARCHAR(255) DEFAULT '' COMMENT '预览文案',
                                 `bizKey` VARCHAR(128) DEFAULT NULL COMMENT '业务幂等键(如 like:{uid}:{postId}), 防重复通知',
                                 `isRead` TINYINT DEFAULT 0 COMMENT '0未读 1已读',
@@ -223,6 +224,10 @@ ALTER TABLE `board_follow`
 ALTER TABLE `post`
     ADD COLUMN `draftOfId` BIGINT DEFAULT NULL COMMENT '草稿来源帖id(null=新建草稿)' AFTER `isDelete`,
     ADD KEY `idxDraft` (`userId`,`draftOfId`);
+
+# 4. notification 表补 commentId（评论/回复通知跳转锚点）
+ALTER TABLE `notification`
+    ADD COLUMN `commentId` BIGINT DEFAULT NULL COMMENT '评论内部id(评论/回复通知跳转锚点, 前端定位楼中楼评论)' AFTER `targetId`;
 
 # 审核行为日志表，同步落地
 CREATE TABLE `auditLog` (
@@ -265,4 +270,23 @@ CREATE TABLE `comment_like` (
                                 PRIMARY KEY (`id`),
                                 UNIQUE KEY `ukCommentUser` (`commentId`,`userId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论点赞表';
+
+CREATE TABLE `comment_like` (
+                                `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(雪花)',
+                                `commentId` BIGINT NOT NULL COMMENT '评论内部id',
+                                `userId` BIGINT NOT NULL COMMENT '点赞者内部id',
+                                `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `ukCommentUser` (`commentId`,`userId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论点赞表';
+
+CREATE TABLE `post_like` (
+                             `id` BIGINT NOT NULL AUTO_INCREMENT,
+                             `postId` BIGINT NOT NULL,
+                             `userId` BIGINT NOT NULL,
+                             `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `ukPostUser` (`postId`,`userId`),
+                             KEY `idxUser` (`userId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子点赞表';
 

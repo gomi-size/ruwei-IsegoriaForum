@@ -43,6 +43,11 @@ public class SendNotificationDTO implements Serializable {
     private Long targetId;
 
     /**
+     * 评论内部 id（评论/回复通知跳转锚点，前端据此定位楼中楼评论；其它类型可空）
+     */
+    private Long commentId;
+
+    /**
      * 预览文案
      */
     private String content;

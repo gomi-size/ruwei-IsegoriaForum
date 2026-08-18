@@ -150,6 +150,7 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
         n.setType(dto.getType());
         n.setTargetType(dto.getTargetType());
         n.setTargetId(dto.getTargetId());
+        n.setCommentId(dto.getCommentId());
         n.setContent(dto.getContent());
         n.setBizKey(dto.getBizKey());
         n.setIsRead(0);
@@ -169,6 +170,7 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
         push.setSenderId(dto.getSenderId());
         push.setTargetType(dto.getTargetType());
         push.setTargetId(dto.getTargetId());
+        push.setCommentId(dto.getCommentId());
         push.setContent(dto.getContent());
         push.setCreatedAt(n.getCreatedAt().getTime());
         publisher.push(dto.getReceiverId(), push);

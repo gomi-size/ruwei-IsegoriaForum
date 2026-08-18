@@ -47,6 +47,11 @@ public class NotificationVO implements Serializable {
     private String content;
 
     /**
+     * 评论内部 id（评论/回复通知跳转锚点，前端据此定位楼中楼评论）
+     */
+    private Long commentId;
+
+    /**
      * 0未读 1已读
      */
     private Integer isRead;

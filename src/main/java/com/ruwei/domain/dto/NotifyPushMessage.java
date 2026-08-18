@@ -32,6 +32,11 @@ public class NotifyPushMessage implements Serializable {
      * 关联对象 id
      */
     private Long targetId;
+
+    /**
+     * 评论内部 id（评论/回复通知跳转锚点，前端据此定位楼中楼评论）
+     */
+    private Long commentId;
     /**
      * 预览文案
      */
