@@ -1,6 +1,7 @@
 package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
+import com.ruwei.annotation.RateLimit;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
@@ -43,6 +44,7 @@ public class NotificationController {
      * 入参为表单/url 参数（非 JSON）：ids=1&ids=2&ids=3；不传则全部已读。
      */
     @PostMapping("/read")
+    @RateLimit(limit = 30, window = 60, prefix = "notificationRead")
     public BaseResponse<String> readMessage(@RequestParam(required = false) List<Long> ids){
 
         notificationService.readMessage(ids);

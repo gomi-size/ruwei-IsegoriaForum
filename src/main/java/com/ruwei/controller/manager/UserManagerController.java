@@ -9,6 +9,8 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ruwei.annotation.RateLimit;
+import com.ruwei.annotation.RateLimitDimension;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
@@ -40,6 +42,7 @@ public class UserManagerController {
      * @return
      */
     @PostMapping("/register")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
     public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
 
         User user= userService.userRegister(userRegisterDTO);
@@ -54,6 +57,7 @@ public class UserManagerController {
      * @return
      */
     @PostMapping("/login")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "adminLogin")
     public BaseResponse<UserVO> userLogin(@RequestBody UserLoginDTO userLogin) {
         User user = userService.userLogin(userLogin);
         StpUtil.login(user.getId());

@@ -2,6 +2,7 @@ package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.ruwei.annotation.RateLimit;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.dto.BoardFollowPageDTO;
@@ -33,6 +34,7 @@ public class BoardFollowController {
      * 入参 boardId（板块内部主键）
      */
     @PostMapping("/follow")
+    @RateLimit(limit = 10, window = 1, prefix = "boardFollow")
     public BaseResponse<String> followBoard(Long boardId) {
         boardFollowService.followBoard(boardId);
         return ResultUtils.success("关注成功");
@@ -43,6 +45,7 @@ public class BoardFollowController {
      * 入参 boardId（板块内部主键）
      */
     @PostMapping("/cancelFollow")
+    @RateLimit(limit = 10, window = 1, prefix = "boardFollow")
     public BaseResponse<String> cancelFollowBoard(Long boardId) {
         boardFollowService.cancelFollowBoard(boardId);
         return ResultUtils.success("取消成功");

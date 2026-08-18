@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.dev33.satoken.annotation.SaIgnore;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.ruwei.annotation.RateLimit;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.dto.BoardQueryDTO;
@@ -29,6 +30,7 @@ public class BoardController {
      */
     @PostMapping("/add")
     @SaCheckLogin
+    @RateLimit(limit = 2, window = 60, prefix = "board")
     public BaseResponse<Board> createBoard(@RequestBody CreateBoardDTO createBoardDTO) {
         Board board = boardService.createBoard(createBoardDTO);
         return ResultUtils.success(board);

@@ -1,6 +1,7 @@
 package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
+import com.ruwei.annotation.RateLimit;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.dto.UserFollowOrFansPageDTO;
@@ -31,6 +32,7 @@ public class UserFollowController {
      * 入参可传 id（内部主键）或 userId（对外编码），二选一即可，库内统一存内部 id
      */
     @PostMapping("/follow")
+    @RateLimit(limit = 10, window = 1, prefix = "userFollow")
     public BaseResponse<String> followUser(Long id, Long userId){
         userFollowService.followUser(id, userId);
         return ResultUtils.success("关注成功");
@@ -41,6 +43,7 @@ public class UserFollowController {
      * 入参可传 id（内部主键）或 userId（对外编码），二选一即可，库内统一存内部 id
      */
     @PostMapping("/cancelFollow")
+    @RateLimit(limit = 10, window = 1, prefix = "userFollow")
     public BaseResponse<String> cancelFollowUser(Long id, Long userId){
         userFollowService.cancelFollowUser(id, userId);
         return ResultUtils.success("取消成功");

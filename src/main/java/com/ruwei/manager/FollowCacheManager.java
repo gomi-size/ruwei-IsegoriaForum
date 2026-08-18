@@ -19,7 +19,7 @@ import java.util.Set;
  * 读优先 Redis，键缺失时回源 user_follow 表重建（懒加载，无需迁移脚本）。
  * 写路径由事件监听器在事务提交后调用（见 FollowRedisEventListener）。
  */
-@Mapper
+@Component
 public class FollowCacheManager {
 
     //设置key

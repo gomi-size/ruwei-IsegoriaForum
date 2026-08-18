@@ -9,6 +9,8 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ruwei.annotation.RateLimit;
+import com.ruwei.annotation.RateLimitDimension;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
@@ -42,6 +44,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/register")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
     public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
 
         User user= userService.userRegister(userRegisterDTO);
@@ -56,6 +59,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/login")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "login")
     public BaseResponse<UserVO> userLogin(@RequestBody UserLoginDTO userLogin) {
         User user = userService.userLogin(userLogin);
         StpUtil.login(user.getId());
@@ -82,6 +86,7 @@ public class UserController {
      */
     @SaCheckLogin
     @PostMapping("/cancel")
+    @RateLimit(limit = 1, window = 60, prefix = "userCancel")
     public BaseResponse<String> userCancel(){
         Long userId = StpUtil.getLoginIdAsLong();
 
@@ -171,6 +176,7 @@ public class UserController {
      */
     @SaCheckLogin
     @PostMapping("/edit")
+    @RateLimit(limit = 10, window = 60, prefix = "userEdit")
     public BaseResponse<String> editUserInfo(@RequestBody UserEditDTO userEditDTO){
         userService.editUserInfo(userEditDTO);
         return ResultUtils.success("更新成功");
@@ -185,6 +191,7 @@ public class UserController {
      */
     @SaCheckLogin
     @PostMapping("/editPassword")
+    @RateLimit(limit = 5, window = 60, prefix = "password")
     public BaseResponse<String> editUserPassword(Long id,String password){
         userService.editUserPassword(id,password);
         return ResultUtils.success("修改密码成功");
@@ -197,6 +204,8 @@ public class UserController {
      * @return
      */
     @PostMapping("/forgetPassword")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 1, window = 60, prefix = "forget")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 5, window = 3600, prefix = "forget")
     public BaseResponse<Boolean> forgetPassword(Long userId,String Password){
         userService.forgetPassword(userId,Password);
         return ResultUtils.success(true);

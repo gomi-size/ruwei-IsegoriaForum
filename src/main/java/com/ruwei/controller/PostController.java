@@ -3,6 +3,7 @@ package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaIgnore;
+import com.ruwei.annotation.RateLimit;
 import com.ruwei.common.*;
 import com.ruwei.domain.dto.PostDTO;
 import com.ruwei.domain.vo.PostBrowseVO;
@@ -40,6 +41,7 @@ public class PostController {
      * （与入参同一套词汇），id / userId / boardId 序列化为字符串（雪花 id 防前端丢精度）。</p>
      */
     @PostMapping("/add")
+    @RateLimit(limit = 5, window = 60, prefix = "post")
     public BaseResponse<PostVO> createPost(@RequestBody PostDTO postDTO) {
         PostVO postVO = postService.createPost(postDTO);
         return ResultUtils.success(postVO);
@@ -49,6 +51,7 @@ public class PostController {
      * 编辑帖子（先审后发：草稿另存为新记录直接生效；其余直接覆盖正式字段并重新送审，审核期间不对外展示）
      */
     @PostMapping("/update")
+    @RateLimit(limit = 5, window = 60, prefix = "post")
     public BaseResponse<String> updatePost(@RequestBody PostDTO postDTO) {
 
         return postService.updatePost(postDTO);
@@ -117,6 +120,7 @@ public class PostController {
      * @return 目标帖子 id（字符串）：编辑草稿返回原帖 id，新建草稿返回新帖 id
      */
     @PostMapping("/publishDraft")
+    @RateLimit(limit = 5, window = 60, prefix = "post")
     public BaseResponse<String> publishDraft(@RequestBody PostDTO postDTO) {
         return postService.publishDraft(postDTO.getDraftId(), postDTO);
     }

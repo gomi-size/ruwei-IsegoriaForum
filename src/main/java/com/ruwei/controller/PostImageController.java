@@ -1,6 +1,7 @@
 package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
+import com.ruwei.annotation.RateLimit;
 import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.vo.ImageUploadVO;
@@ -24,6 +25,7 @@ public class PostImageController {
      * 上传帖子图片。
      */
     @PostMapping("/upload")
+    @RateLimit(limit = 10, window = 60, prefix = "upload")
     public BaseResponse<ImageUploadVO> uploadImage(@RequestParam("file") MultipartFile file) {
         return ResultUtils.success(postImageService.uploadImage(file));
     }
