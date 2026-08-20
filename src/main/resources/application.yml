@@ -44,6 +44,21 @@ spring:
           max-idle: 8
           min-idle: 0
           max-wait: -1ms
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest          # 生产环境走环境变量
+    password: guest
+    publisher-confirm-type: correlated   # 生产者确认
+    publisher-returns: true              # 路由失败回调
+    listener:
+      simple:
+        acknowledge-mode: manual         # 消费者手动 ACK
+        retry:
+          enabled: true
+          max-attempts: 3                # 本地重试 3 次后进 DLQ
+          initial-interval: 1000ms
+          multiplier: 2.0
   profiles:
     active: local
   # es
