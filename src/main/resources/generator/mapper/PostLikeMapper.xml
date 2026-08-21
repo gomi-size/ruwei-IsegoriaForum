@@ -7,7 +7,7 @@
     <resultMap id="BaseResultMap" type="com.ruwei.domain.empty.PostLike">
             <id property="id" column="id" jdbcType="BIGINT"/>
             <result property="postId" column="postId" jdbcType="BIGINT"/>
-            <result property="userid" column="userId" jdbcType="BIGINT"/>
+            <result property="userId" column="userId" jdbcType="BIGINT"/>
             <result property="createdAt" column="createdAt" jdbcType="TIMESTAMP"/>
     </resultMap>
 

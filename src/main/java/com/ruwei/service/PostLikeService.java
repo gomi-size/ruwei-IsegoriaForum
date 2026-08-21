@@ -1,6 +1,7 @@
 package com.ruwei.service;
 
 import com.baomidou.mybatisplus.spring.service.IService;
+import com.ruwei.domain.dto.PostLikeDTO;
 import com.ruwei.domain.empty.PostLike;
 
 
@@ -11,4 +12,9 @@ import com.ruwei.domain.empty.PostLike;
 */
 public interface PostLikeService extends IService<PostLike> {
 
+    /**
+     * 点赞和取消点赞
+     * @param postLikeDTO
+     */
+    void PostLike(PostLikeDTO postLikeDTO);
 }
