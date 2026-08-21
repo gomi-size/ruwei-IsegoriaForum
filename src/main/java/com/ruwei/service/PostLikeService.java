@@ -12,9 +12,4 @@ import com.ruwei.domain.empty.PostLike;
 */
 public interface PostLikeService extends IService<PostLike> {
 
-    /**
-     * 点赞和取消点赞
-     * @param postLikeDTO
-     */
-    void PostLike(PostLikeDTO postLikeDTO);
 }

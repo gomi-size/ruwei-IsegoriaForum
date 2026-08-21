@@ -139,7 +139,7 @@ public class LikeCacheManager {
      * @param userId 点赞者内部 id（一律取登录态，不信任前端）
      * @return {@link ToggleResult}，{@code action=1} 表示切换后为「已赞」、{@code 0} 为「已取赞」，count 为最新计数
      */
-    public ToggleResult toggleResult(Long postId, Long userId) {
+    public ToggleResult togglePostLike(Long postId, Long userId) {
         // 先确保关系键与计数键已就位（缺失回源 DB），再执行原子脚本
         ensurePostLoaded(postId);
         List<Long> res = redis.execute(TOGGLE_SCRIPT,
@@ -156,7 +156,7 @@ public class LikeCacheManager {
      *
      * @param commentId 评论内部 id（由列表接口下发的内部 id）
      * @param userId    点赞者内部 id（取登录态）
-     * @return {@link ToggleResult}，语义同 {@link #toggleResult}
+     * @return {@link ToggleResult}，语义同 {@link #togglePostLike}
      */
     public ToggleResult toggleCommentLike(Long commentId, Long userId) {
         ensureCommentLoaded(commentId);
