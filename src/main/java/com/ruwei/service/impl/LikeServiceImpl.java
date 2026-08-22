@@ -2,9 +2,11 @@ package com.ruwei.service.impl;
 
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.core.lang.UUID;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
+import com.ruwei.component.notification.event.LikeEvent;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
@@ -29,10 +31,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Map;
 
 @Slf4j
@@ -60,6 +64,19 @@ public class LikeServiceImpl implements LikeService {
     @Value("${like.fallback-to-db:false}")
     private boolean fallbackToDb;
 
+    @PostConstruct
+    public void initConfirmCallback() {
+        // MQ confirm 失败 → 异步 best-effort 降级直写 DB（11 §9.1 ⑥）
+        rabbitTemplate.setConfirmCallback((correlationData, ack, cause) -> {
+            if (!ack && correlationData != null) {
+                Object body = ((CorrelationData) correlationData).getReturned();
+                if (body instanceof LikePersistMessage msg) {
+                    log.warn("点赞 MQ 确认失败，降级直写 DB eventId={} cause={}", msg.getEventId(), cause);
+                    directPersist(msg);
+                }
+            }
+        });
+    }
 
 
 
@@ -79,6 +96,7 @@ public class LikeServiceImpl implements LikeService {
         if(fallbackToDb){
             return directTogglePostDb(postId, loginId, post.getUserId());
         }
+        //进行点赞
         LikeCacheManager.ToggleResult r = likeCacheManager.togglePostLike(postId, loginId);
         sendMq(1, postId, loginId, r.action());
 
@@ -87,22 +105,61 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public LikeToggleVO toggleCommentLike(Long commentId) {
-        return null;
+        Long loginId = StpUtil.getLoginIdAsLong();
+        Comment comment = commentService.getById(commentId);
+        // 不存在或已删除(status=2) 视为不存在（对齐 CommentService.deleteComment 口径）
+        ThrowUtils.throwIf(comment == null || comment.getStatus() == 2,
+                ErrorCode.NOT_FOUND_ERROR, "评论不存在");
+
+        try {
+            if (fallbackToDb) {
+                return directToggleCommentDb(commentId, loginId);
+            }
+            LikeCacheManager.ToggleResult r = likeCacheManager.toggleCommentLike(commentId, loginId);
+            sendMq(2, commentId, loginId, r.action());
+            // 评论点赞本期不发通知（后期加）
+            return new LikeToggleVO(r.action() == 1, r.count());
+        } catch (RedisConnectionFailureException ex) {
+            log.warn("Redis 不可用，降级纯 DB 路径 commentId={}", commentId);
+            return directToggleCommentDb(commentId, loginId);
+        }
     }
 
+    //读
     @Override
     public LikeToggleVO getPostLikeStatus(String postCode) {
-        return null;
+        long loginId = StpUtil.getLoginIdAsLong();
+        Post post = postService.lambdaQuery().eq(Post::getPostCode, postCode).one();
+        ThrowUtils.throwIf(post == null, ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+        boolean liked = likeCacheManager.isPostLiked(post.getId(), loginId);
+        long count = likeCacheManager.getPostLikeCount(post.getId());
+        LikeToggleVO vo = new LikeToggleVO();
+        vo.setIsLiked(liked);
+        vo.setLikeCount(count);
+        return vo;
     }
 
     @Override
     public Long getPostLikeCount(String postCode) {
-        return 0L;
+        Post post = postService.lambdaQuery().eq(Post::getPostCode, postCode).one();
+        ThrowUtils.throwIf(post == null, ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
+        return likeCacheManager.getPostLikeCount(post.getId());
     }
 
     @Override
     public Map<Long, Boolean> batchPostLiked(Collection<Long> postIds, Long loginId) {
-        return Map.of();
+        try {
+            return likeCacheManager.batchIsPostLiked(postIds, loginId);
+        } catch (RedisConnectionFailureException ex) {
+            log.warn("Redis 不可用，批量 isLiked 降级 DB");
+            Map<Long, Boolean> map = new HashMap<>();
+            for (Long pid : postIds) {
+                boolean liked = postLikeMapper.selectCount(new LambdaQueryWrapper<PostLike>()
+                        .eq(PostLike::getPostId, pid).eq(PostLike::getUserId, loginId)) > 0;
+                map.put(pid, liked);
+            }
+            return map;
+        }
     }
 
 
@@ -120,7 +177,31 @@ public class LikeServiceImpl implements LikeService {
         // PUBLIC 无需校验
     }
 
-    //降级处理，如果redis和Mq不可用那就走
+    private void sendMq(Integer targetType,Long targetId,Long userId,Integer action){
+        //构建消息体
+        LikePersistMessage msg = LikePersistMessage.builder()
+                .eventId(UUID.randomUUID().toString())
+                .targetType(targetType)
+                .targetId(targetId)
+                .userId(userId)
+                .action(action)
+                .timestamp(System.currentTimeMillis())
+                .build();
+        //发送消息
+        try{
+            rabbitTemplate.convertAndSend("like.exchange",
+                    targetType == 1 ? "like.post" : "like.comment",
+                    msg,
+                    new CorrelationData(msg.getEventId())
+            );
+            //降级处理
+        }catch (Exception e){
+                log.warn("点赞 MQ 发送异常，降级直写 DB targetId={}", targetId, e);
+                directPersist(msg);
+        }
+    }
+
+    //降级处理，如果redis和Mq不可用那就走DB
     private LikeToggleVO directTogglePostDb(Long postId, Long loginId, Long postUserId) {
         LikeToggleVO vo = new LikeToggleVO();
         PostLike exist = postLikeMapper.selectOne(new LambdaQueryWrapper<PostLike>()
@@ -168,6 +249,7 @@ public class LikeServiceImpl implements LikeService {
         return vo;
     }
 
+    /** confirm 失败 / 发送异常时的同步落库（仅补「赞」记录；取赞降级极少见，由对账 Job 兜底） */
     private void directPersist(LikePersistMessage msg) {
         if (msg.getTargetType() == 1) {
             Long postId = msg.getTargetId();

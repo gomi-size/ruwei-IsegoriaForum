@@ -1,4 +1,4 @@
-package com.ruwei.es.schedule;
+package com.ruwei.schedule;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruwei.domain.empty.Post;
