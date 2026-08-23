@@ -37,6 +37,7 @@ import com.ruwei.es.service.EsPostSyncService;
 import com.ruwei.mapper.PostMapper;
 import com.ruwei.service.AuditlogService;
 import com.ruwei.service.BoardService;
+import com.ruwei.service.LikeService;
 import com.ruwei.service.PostImageService;
 import com.ruwei.service.PostService;
 import com.ruwei.service.PostTagService;
@@ -45,6 +46,7 @@ import com.ruwei.service.UserFollowService;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -118,6 +120,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
+
+    /**
+     * 点赞服务：列表批量装配 isLiked。
+     * {@code @Lazy} 打破与 LikeServiceImpl（注入 PostService）的循环依赖——
+     * Spring Boot 3 默认禁止循环引用，延迟代理到实际调用时才解析。
+     */
+    @Resource
+    @Lazy
+    private LikeService likeService;
 
     @Resource
     private EsPostSyncService esPostSyncService;
@@ -785,6 +796,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
+        // 当前登录用户批量装配 isLiked（Redis pipeline，缺失回源 DB；未登录跳过）
+        fillIsLiked(voList);
         IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
@@ -863,6 +876,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
+        // 当前登录用户批量装配 isLiked（Redis pipeline，缺失回源 DB）
+        fillIsLiked(voList);
         IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
@@ -1083,6 +1098,36 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             vo.setUserAvatar(author.getAvatar());
         }
         return vo;
+    }
+
+    /**
+     * 按当前登录用户批量填充列表 VO 的 {@code isLiked}（对齐 11-like-module.md §13 末段设计）。
+     *
+     * <p>isLiked 是用户维度动态状态，不冗余进 post 表 / ES 索引（会串号），查询后按本页
+     * postIds 一次 {@link LikeService#batchPostLiked} 装配；未登录（游客浏览公开列表）跳过，
+     * VO.isLiked 保持 null，前端按未赞渲染。batchPostLiked 内部已处理 Redis 不可用降级 DB，
+     * 列表接口不会因 Redis 挂而报错。</p>
+     *
+     * @param voList 本页已组装的 PostBrowseVO 列表（原地填充，不新建）
+     */
+    private void fillIsLiked(List<PostBrowseVO> voList) {
+        if (voList == null || voList.isEmpty() || !StpUtil.isLogin()) {
+            return;
+        }
+        long loginId = StpUtil.getLoginIdAsLong();
+        List<Long> postIds = voList.stream()
+                .map(PostBrowseVO::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (postIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Boolean> likedMap = likeService.batchPostLiked(postIds, loginId);
+        voList.forEach(vo -> {
+            if (vo.getId() != null) {
+                vo.setIsLiked(likedMap.getOrDefault(vo.getId(), false));
+            }
+        });
     }
 
     /**

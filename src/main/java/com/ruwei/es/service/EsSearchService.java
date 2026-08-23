@@ -1,9 +1,11 @@
 package com.ruwei.es.service;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.es.doc.PostDoc;
+import com.ruwei.service.LikeService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -21,6 +23,8 @@ import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -28,6 +32,8 @@ public class EsSearchService {
 
     @Resource
     private ElasticsearchOperations operations;
+    @Resource
+    private LikeService likeService;
 
     /**
      * 帖子搜索。
@@ -107,7 +113,41 @@ public class EsSearchService {
         Page<PostBrowseVO> page = new Page<>(current, pageSize);
         page.setRecords(list);
         page.setTotal(hits.getTotalHits());
+
+        // 当前登录用户批量装配 isLiked（游客跳过；Redis pipeline 一次往返，缺失回源 DB，防 N+1）
+        fillIsLiked(list);
+
         return page;
+    }
+
+    /**
+     * 按当前登录用户批量填充 {@code isLiked}（对齐 11-like-module.md §13 末段设计）。
+     *
+     * <p>isLiked 是用户维度动态状态，不冗余进 ES 索引（会串号），查询后按本页 postIds
+     * 一次 {@link LikeService#batchPostLiked} 装配；未登录（游客可访问 /search/post）
+     * 直接跳过，VO.isLiked 保持 null，前端按未赞渲染。</p>
+     *
+     * @param list 本页已组装的 PostBrowseVO 列表（原地填充，不新建）
+     */
+    private void fillIsLiked(List<PostBrowseVO> list) {
+        if (list == null || list.isEmpty() || !StpUtil.isLogin()) {
+            return;
+        }
+        long loginId = StpUtil.getLoginIdAsLong();
+        List<Long> postIds = list.stream()
+                .map(PostBrowseVO::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (postIds.isEmpty()) {
+            return;
+        }
+        // batchPostLiked 内部已处理 Redis 不可用 → 降级 DB，列表接口不会因 Redis 挂而报错
+        Map<Long, Boolean> likedMap = likeService.batchPostLiked(postIds, loginId);
+        list.forEach(vo -> {
+            if (vo.getId() != null) {
+                vo.setIsLiked(likedMap.getOrDefault(vo.getId(), false));
+            }
+        });
     }
 
     private Sort buildSort(String sort) {

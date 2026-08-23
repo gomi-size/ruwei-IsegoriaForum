@@ -27,6 +27,7 @@ import com.ruwei.domain.empty.User;
 import com.ruwei.domain.utils.CountUtils;
 import com.ruwei.domain.vo.AuthorMiniVO;
 import com.ruwei.domain.vo.CommentVO;
+import com.ruwei.es.event.PostIndexEvent;
 import com.ruwei.manager.FollowCacheManager;
 import com.ruwei.service.AuditlogService;
 import com.ruwei.service.BoardService;
@@ -174,6 +175,8 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment>
             eventPublisher.publishEvent(new CommentEvent(this, postId, comment.getId(),
                     loginId, post.getUserId(), safeContent));
         }
+        //需要更新es里面的数据
+        eventPublisher.publishEvent(new PostIndexEvent(this, postId, PostIndexEvent.Action.INDEX));
     }
 
     /**
@@ -234,6 +237,8 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment>
         if (!isCommenter) {
             saveAuditLog(commentId, loginId);
         }
+        //需要更新es里面的数据
+        eventPublisher.publishEvent(new PostIndexEvent(this, postId, PostIndexEvent.Action.INDEX));
     }
 
 
@@ -266,7 +271,8 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment>
                         .eq(Comment::getPostId, postId)
                         .eq(Comment::getParentId, 0)
                         .eq(Comment::getStatus, 1)
-                        .orderByAsc(Comment::getCreatedAt));
+                        .orderByDesc(Comment::getLikeCount)
+                        .orderByDesc(Comment::getCreatedAt));
         List<Comment> levelOnes = page.getRecords();
 
         if (levelOnes.isEmpty()) {
@@ -279,7 +285,8 @@ public class CommentServiceImpl extends ServiceImpl<CommentMapper, Comment>
         List<Comment> replies = lambdaQuery()
                 .in(Comment::getParentId, levelOneIds)
                 .eq(Comment::getStatus, 1)
-                .orderByAsc(Comment::getParentId)
+                .orderByDesc(Comment::getParentId)
+                .orderByDesc(Comment::getLikeCount)
                 .orderByDesc(Comment::getCreatedAt)
                 .list();
         // groupingBy 保序（SQL 已按 createdAt 正序），replyCount 用 DB 字段，replies 只挂前 2 条

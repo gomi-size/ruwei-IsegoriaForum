@@ -83,6 +83,11 @@ public class PostBrowseVO implements Serializable {
     private Integer collectCount;
 
     /**
+     *是否点赞
+     */
+    private Boolean isLiked;
+
+    /**
      * 浏览数
      */
     private Integer viewCount;

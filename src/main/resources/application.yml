@@ -47,8 +47,8 @@ spring:
   rabbitmq:
     host: localhost
     port: 5672
-    username: guest          # 生产环境走环境变量
-    password: guest
+    username: root          # 生产环境走环境变量
+    password: 123456
     publisher-confirm-type: correlated   # 生产者确认
     publisher-returns: true              # 路由失败回调
     listener:

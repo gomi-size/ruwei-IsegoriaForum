@@ -16,15 +16,20 @@ import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
 import com.ruwei.component.SensitiveWordFilter;
+import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.domain.vo.UserVO;
+import com.ruwei.es.event.PostIndexEvent;
 import com.ruwei.mapper.UserFollowMapper;
+import com.ruwei.service.PostService;
 import com.ruwei.service.UserService;
 import com.ruwei.mapper.UserMapper;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import jakarta.annotation.Resource;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -51,6 +56,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    @Lazy
+    private PostService postService;
 
     /**
      * userId 计数器在 Redis 中的 key。

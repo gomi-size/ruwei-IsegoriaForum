@@ -1,6 +1,7 @@
 package com.ruwei.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaIgnore;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -63,6 +64,7 @@ public class CommentController {
      * 分页查询沿用项目 POST + DTO 惯例（对齐 /post/list、/boards/list）。</p>
      */
     @PostMapping("/list")
+    @SaIgnore
     public BaseResponse<IPage<CommentVO>> listByPost(@RequestBody CommentPageDTO dto){
         return ResultUtils.success(commentService.listByPost(dto));
     }
@@ -74,6 +76,7 @@ public class CommentController {
      * isLiked / 作者 / replyToUser 批量组装。分页查询沿用项目 POST + DTO 惯例。</p>
      */
     @PostMapping("/replies")
+    @SaIgnore
     public BaseResponse<IPage<CommentVO>> listReplies(@RequestBody CommentReplyPageDTO dto){
         return ResultUtils.success(commentService.listReplies(dto));
     }

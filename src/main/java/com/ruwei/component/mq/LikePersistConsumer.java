@@ -8,6 +8,7 @@ import com.ruwei.domain.empty.CommentLike;
 import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.PostLike;
 import com.ruwei.domain.utils.CountUtils;
+import com.ruwei.es.event.PostIndexEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
 import com.rabbitmq.client.Channel;
@@ -18,6 +19,7 @@ import com.ruwei.service.CommentService;
 import com.ruwei.service.PostService;
 import jakarta.annotation.Resource;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -73,6 +75,8 @@ public class LikePersistConsumer {
     private CommentService commentService;       // 评论主表服务（用于更新总数）
     @Resource
     private StringRedisTemplate redis;
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
 
 
     /**
@@ -163,6 +167,10 @@ public class LikePersistConsumer {
      * {@code post.likeCount +1}（命中唯一键 {@code ukPostUser} 视为幂等成功，不重复计数）。</p>
      * <p>action=0（取赞）：DELETE {@code post_like}（按 postId+userId）；仅当确实删除了记录
      * （影响行数=1）才 {@code post.likeCount -1}，避免「无记录却 -1」导致计数下穿。</p>
+     * <p><b>ES 索引同步</b>：计数真实变更后发布 {@link PostIndexEvent}（INDEX），由
+     * {@code PostIndexEventListener} 异步重建 ES 文档（{@code indexByPostId} 内部带 shouldIndex 兜底），
+     * 保证主页推荐流（{@code /search/post} 读 ES 索引）的 likeCount 与 DB 一致；
+     * 幂等跳过（计数未变）时不发布，避免无谓重建。</p>
      *
      * @param msg 点赞落库消息（{@code targetType=1}，{@code targetId}=postId）
      */
@@ -178,6 +186,8 @@ public class LikePersistConsumer {
                 boolean inserted = postLikeMapper.insert(record) > 0;
                 if (inserted) {                         // 仅真正新增才 +1，防漂移
                     CountUtils.increment(postService, Post::getId, postId, "likeCount", 1);
+                    // 点赞数真实变更 → 重建 ES 索引，保证推荐流计数一致
+                    eventPublisher.publishEvent(new PostIndexEvent(this, postId, PostIndexEvent.Action.INDEX));
                 }
             } catch (DuplicateKeyException ex) {
                 log.warn("点赞幂等跳过（唯一键命中）postId={} userId={}", postId, userId);
@@ -187,6 +197,8 @@ public class LikePersistConsumer {
                     .eq(PostLike::getPostId, postId).eq(PostLike::getUserId, userId));
             if (removed > 0) {
                 CountUtils.increment(postService, Post::getId, postId, "likeCount", -1);
+                // 取赞同样真实变更 → 重建 ES 索引
+                eventPublisher.publishEvent(new PostIndexEvent(this, postId, PostIndexEvent.Action.INDEX));
             }
         }
     }

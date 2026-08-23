@@ -14,6 +14,7 @@ import com.ruwei.domain.dto.LikePersistMessage;
 import com.ruwei.domain.empty.*;
 import com.ruwei.domain.utils.CountUtils;
 import com.ruwei.domain.vo.LikeToggleVO;
+import com.ruwei.es.event.PostIndexEvent;
 import com.ruwei.manager.FollowCacheManager;
 import com.ruwei.manager.LikeCacheManager;
 import com.ruwei.mapper.CommentLikeMapper;
@@ -392,6 +393,9 @@ public class LikeServiceImpl implements LikeService {
      * <p>幂等防护：先查关系存在性，已存在则跳过；插入成功（影响行数 &gt; 0）才原子 +1 计数，
      * 绝不盲加减，避免与消费者落库重复叠加。</p>
      *
+     * <p>帖子点赞真实新增时同步发布 {@link PostIndexEvent}（INDEX）重建 ES 索引，
+     * 保证主页推荐流（读 ES）的 likeCount 与 DB 一致（与 MQ 消费者路径同一机制）。</p>
+     *
      * @param msg 点赞消息体（含 targetType / targetId / userId）
      */
     private void directPersist(LikePersistMessage msg) {
@@ -403,8 +407,11 @@ public class LikeServiceImpl implements LikeService {
             if (exist == null) {
                 PostLike r = new PostLike();
                 r.setPostId(postId); r.setUserId(userId); r.setCreatedAt(new Date());
-                if (postLikeMapper.insert(r) > 0)
+                if (postLikeMapper.insert(r) > 0) {
                     CountUtils.increment(postService, Post::getId, postId, "likeCount", 1);
+                    // 降级路径同样同步 ES 索引，避免推荐流计数不一致
+                    eventPublisher.publishEvent(new PostIndexEvent(this, postId, PostIndexEvent.Action.INDEX));
+                }
             }
         } else {
             Long commentId = msg.getTargetId();
