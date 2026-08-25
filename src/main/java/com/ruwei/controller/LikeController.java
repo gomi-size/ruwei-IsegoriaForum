@@ -25,7 +25,7 @@ public class LikeController {
 
     /** 帖子点赞 toggle（无状态翻转，返回新状态） */
     @PostMapping("/post/{postCode}")
-    @RateLimit(limit = 10, window = 1, prefix = "like")
+    //@RateLimit(limit = 10, window = 1, prefix = "like")
     public BaseResponse<LikeToggleVO> togglePost(@PathVariable("postCode") String postCode) {
         ThrowUtils.throwIf(StrUtil.isBlank(postCode), ErrorCode.PARAMS_ERROR, "帖子编码不能为空");
         return ResultUtils.success(likeService.togglePostLike(postCode));
@@ -33,7 +33,7 @@ public class LikeController {
 
     /** 评论点赞 toggle */
     @PostMapping("/comment/{commentId}")
-    @RateLimit(limit = 10, window = 1, prefix = "like")
+    //@RateLimit(limit = 10, window = 1, prefix = "like")
     public BaseResponse<LikeToggleVO> toggleComment(@PathVariable("commentId") Long commentId) {
         ThrowUtils.throwIf(commentId == null, ErrorCode.PARAMS_ERROR, "评论id不能为空");
         return ResultUtils.success(likeService.toggleCommentLike(commentId));

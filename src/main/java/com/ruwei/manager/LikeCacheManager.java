@@ -229,28 +229,50 @@ public class LikeCacheManager {
      * @param postId 帖子内部 id
      */
     private void ensurePostLoaded(Long postId) {
+
         String usersKey = POST_USERS + postId;
         String countKey = POST_COUNT + postId;
+        String lockKey = "lock:like:rebuild:" + postId;
+        if (Boolean.TRUE.equals(redis.hasKey(usersKey)) && Boolean.TRUE.equals(redis.hasKey(countKey))) {
+            return;
+        }
 
-        if (!redis.hasKey(usersKey)) {
-            // 回源重建赞者集合（判空则写哨兵占位，防止穿透）
-            List<Object> userIds = postLikeMapper.selectObjs(new LambdaQueryWrapper<PostLike>().eq(PostLike::getPostId, postId).
-                    select(PostLike::getUserId));
-            if (userIds.isEmpty()) {
-                // 防空穿透，空值缓存-1
-                redis.opsForSet().add(usersKey, SENTINEL);
-            } else {
-                // 转化为string数组
-                redis.opsForSet().add(usersKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
+        Boolean lock = redis.opsForValue().setIfAbsent(lockKey, "1", Duration.ofSeconds(2));
+        if(Boolean.TRUE.equals(lock)){
+            try {
+                if (Boolean.FALSE.equals(redis.hasKey(usersKey))) {
+                    // 回源重建赞者集合（判空则写哨兵占位，防止穿透）
+                    List<Object> userIds = postLikeMapper.selectObjs(new LambdaQueryWrapper<PostLike>().eq(PostLike::getPostId, postId).
+                            select(PostLike::getUserId));
+                    if (userIds.isEmpty()) {
+                        // 防空穿透，空值缓存-1
+                        redis.opsForSet().add(usersKey, SENTINEL);
+                    } else {
+                        // 转化为string数组
+                        redis.opsForSet().add(usersKey, userIds.stream().map(String::valueOf).toArray(String[]::new));
+                    }
+                }
+                // 计数以真实行数为准
+                if (Boolean.FALSE.equals(redis.hasKey(countKey))) {
+                    // 以 post_like 真实行数为准（对齐 11 §11.2），避免与关系集脱节
+                    long real = postLikeMapper.selectCount(new LambdaQueryWrapper<PostLike>()
+                            .eq(PostLike::getPostId, postId));
+                    redis.opsForValue().set(countKey, String.valueOf(real), TTL);
+                }
+            } finally {
+                redis.delete(lockKey);
             }
+        }else {
+            try {
+                //休眠
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            //再尝试一次，如果能难道就可以那不到就没了
+            ensurePostLoaded(postId);
         }
-        // 计数以真实行数为准
-        if (!redis.hasKey(countKey)) {
-            // 以 post_like 真实行数为准（对齐 11 §11.2），避免与关系集脱节
-            long real = postLikeMapper.selectCount(new LambdaQueryWrapper<PostLike>()
-                    .eq(PostLike::getPostId, postId));
-            redis.opsForValue().set(countKey, String.valueOf(real), TTL);
-        }
+
 
     }
 

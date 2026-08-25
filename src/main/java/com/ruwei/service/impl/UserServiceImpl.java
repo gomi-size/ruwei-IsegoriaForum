@@ -20,7 +20,7 @@ import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
 import com.ruwei.domain.vo.UserVO;
-import com.ruwei.es.event.PostIndexEvent;
+import com.ruwei.es.event.UserProfileUpdatedEvent;
 import com.ruwei.mapper.UserFollowMapper;
 import com.ruwei.service.PostService;
 import com.ruwei.service.UserService;
@@ -258,6 +258,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User user = BeanUtil.copyProperties(userEditDTO, User.class);
         boolean result = updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新信息失败");
+
+        // 用户资料变更 → 异步重建该作者全部 ES 帖子（昵称/头像冗余在 PostDoc，需重新索引）
+        // 注意用被编辑者 id（管理员代改他人资料时也正确）
+        eventPublisher.publishEvent(new UserProfileUpdatedEvent(this, userEditDTO.getId()));
     }
 
     /**

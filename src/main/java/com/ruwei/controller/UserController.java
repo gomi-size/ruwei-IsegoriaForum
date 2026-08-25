@@ -44,7 +44,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/register")
-    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
+    //@RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
     public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
 
         User user= userService.userRegister(userRegisterDTO);
@@ -59,7 +59,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/login")
-    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "login")
+    //@RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "login")
     public BaseResponse<UserVO> userLogin(@RequestBody UserLoginDTO userLogin) {
         User user = userService.userLogin(userLogin);
         StpUtil.login(user.getId());
