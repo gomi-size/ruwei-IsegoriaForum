@@ -131,6 +131,7 @@ public class EsPostSyncService {
                     .forEach(allTagIds::add);
         }
 
+        //查询结果 → tagMap = {1: Tag对象1, 2: Tag对象2, 3: Tag对象3}
         Map<Long, Tag> tagMap = allTagIds.isEmpty() ? Map.of()
                 : tagService.lambdaQuery().in(Tag::getId, allTagIds).list().stream()
                         .collect(Collectors.toMap(Tag::getId, t -> t, (a, b) -> a));

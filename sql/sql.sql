@@ -282,3 +282,33 @@ CREATE TABLE `post_like` (
                              KEY `idxUser` (`userId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子点赞表';
 
+# 用户行为日志
+CREATE TABLE `userBehavior` (
+                                `id` BIGINT NOT NULL COMMENT '主键(雪花 ASSIGN_ID)',
+                                `userId` BIGINT NOT NULL COMMENT '用户内部id',
+                                `postId` BIGINT NOT NULL COMMENT '帖子内部id',
+                                `action` TINYINT NOT NULL COMMENT '1曝光 2点击进入 3浏览/停留 4点赞 5评论 6收藏 7分享 8负反馈',
+                                `source` TINYINT DEFAULT 0 COMMENT '来源: 1推荐流 2关注流 3板块流 4搜索 5热榜 0未知',
+                                `position` SMALLINT DEFAULT 0 COMMENT '信息流展示位次(第几条, 用于去偏)',
+                                `dwellSec` INT DEFAULT 0 COMMENT '停留时长(秒), action=3 有效',
+                                `extras` VARCHAR(255) DEFAULT '' COMMENT '上下文JSON: {net,hour,city}',
+                                `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '行为时间',
+                                PRIMARY KEY (`id`),
+                                KEY `idxUserPost` (`userId`,`postId`),
+                                KEY `idxCreated` (`createdAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户行为日志';
+
+CREATE TABLE `user_interest` (
+                                 `id` BIGINT NOT NULL COMMENT '主键(雪花 ASSIGN_ID)',
+                                 `userId` BIGINT NOT NULL COMMENT '用户内部id(=loginId)',
+                                 `dimension` TINYINT NOT NULL COMMENT '1话题 2标签 3类型 4板块 5作者',
+                                 `value` VARCHAR(64) NOT NULL COMMENT 'topic名 / tagId / type码(1图文2视频3纯文) / boardId / authorId',
+                                 `weight` DECIMAL(6,4) NOT NULL DEFAULT 0 COMMENT '兴趣权重(0~1+, 越大越感兴趣)',
+                                 `lastActiveAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最近一次强化时间',
+                                 `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                 `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                 PRIMARY KEY (`id`),
+                                 UNIQUE KEY `ukUserDimVal` (`userId`,`dimension`,`value`),
+                                 KEY `idxUserDim` (`userId`,`dimension`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户长期兴趣画像';
+

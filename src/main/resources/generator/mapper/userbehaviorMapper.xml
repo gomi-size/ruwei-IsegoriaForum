@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruwei.mapper.userbehaviorMapper">
+
+    <resultMap id="BaseResultMap" type="com.ruwei.domain.empty.userBehavior">
+            <id property="id" column="id" jdbcType="BIGINT"/>
+            <result property="userid" column="userId" jdbcType="BIGINT"/>
+            <result property="postId" column="postId" jdbcType="BIGINT"/>
+            <result property="action" column="action" jdbcType="TINYINT"/>
+            <result property="source" column="source" jdbcType="TINYINT"/>
+            <result property="position" column="position" jdbcType="SMALLINT"/>
+            <result property="dwellSec" column="dwellSec" jdbcType="INTEGER"/>
+            <result property="extras" column="extras" jdbcType="VARCHAR"/>
+            <result property="createdAt" column="createdAt" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,userId,postId,action,source,position,
+        dwellSec,extras,createdAt
+    </sql>
+</mapper>
