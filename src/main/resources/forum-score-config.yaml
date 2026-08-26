@@ -1,0 +1,8 @@
+forum:
+  score:
+    weight:
+      like: 1.0
+      comment: 2.0
+      collect: 3.0
+      share: 4.0
+    tau-hours: 48
