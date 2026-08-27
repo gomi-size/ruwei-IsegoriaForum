@@ -124,7 +124,9 @@ CREATE TABLE `post` (
                         `collectCount` INT DEFAULT 0 COMMENT '收藏数(热度公式×3)',
                         `viewCount` INT DEFAULT 0 COMMENT '浏览数(冷启动召回: viewCount<阈值)',
                         `shareCount` INT DEFAULT 0 COMMENT '分享数(热度公式×4)',
-                        `score` DECIMAL(12,4) DEFAULT 0 COMMENT '预计算热度分: (赞×1+评×2+藏×3+享×4)×exp(-Δt/τ); 热点召回/粗排直接ORDER BY score DESC',
+                        `dislikeCount` INT DEFAULT 0 COMMENT '拉踩(踩)数(热度公式负向降权, 权重默认-1)',
+                        `reportCount` INT DEFAULT 0 COMMENT '举报数(热度公式负向重扣, 权重默认-5)',
+                        `score` DECIMAL(12,4) DEFAULT 0 COMMENT '预计算热度分: (赞×1+评×2+藏×3+享×4+踩×(-1)+举报×(-5))×exp(-Δt/τ); 热点召回/粗排直接ORDER BY score DESC',
                         `isTop` TINYINT DEFAULT 0 COMMENT '置顶(重排强插第1/2位)',
                         `isEssence` TINYINT DEFAULT 0 COMMENT '精华',
                         `auditStatus` TINYINT DEFAULT 2 COMMENT '审核结果: 1待审 2通过 3驳回',
@@ -311,4 +313,34 @@ CREATE TABLE `user_interest` (
                                  UNIQUE KEY `ukUserDimVal` (`userId`,`dimension`,`value`),
                                  KEY `idxUserDim` (`userId`,`dimension`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户长期兴趣画像';
+
+# ------------------------------------------------------------
+# 11. 热度评分参数配置表（单行配置，ScoreRecalcJob 每 5 分钟按此计算帖子热度分）
+#     权重语义：likeW/commentW/collectW/shareW 为正向加分项；
+#               dislikeW/reportW 为负向降权项（配置负数，如 -1.0 / -5.0）；
+#               tauHours 为时间衰减半衰期(小时)，必须 > 0（防除零）。
+#     管理端接口：GET/PUT /admin/score-config（改后内存热刷新，无需重启）
+# ------------------------------------------------------------
+CREATE TABLE `score_config` (
+                                `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                `likeW` DOUBLE NOT NULL DEFAULT 1.0 COMMENT '点赞权重',
+                                `commentW` DOUBLE NOT NULL DEFAULT 2.0 COMMENT '评论权重',
+                                `collectW` DOUBLE NOT NULL DEFAULT 3.0 COMMENT '收藏权重',
+                                `shareW` DOUBLE NOT NULL DEFAULT 4.0 COMMENT '分享权重',
+                                `dislikeW` DOUBLE NOT NULL DEFAULT -1.0 COMMENT '拉踩(踩)权重, 负值扣分',
+                                `reportW` DOUBLE NOT NULL DEFAULT -5.0 COMMENT '举报权重, 负值重扣',
+                                `tauHours` DOUBLE NOT NULL DEFAULT 48.0 COMMENT '时间衰减半衰期(小时), >0',
+                                `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+                                PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='热度评分参数配置表(单行, 管理端动态调整)';
+
+INSERT INTO `score_config` (`likeW`,`commentW`,`collectW`,`shareW`,`dislikeW`,`reportW`,`tauHours`)
+VALUES (1.0, 2.0, 3.0, 4.0, -1.0, -5.0, 48.0);
+
+# ------------------------------------------------------------
+# 5. 旧库迁移：post 表补 拉踩/举报 计数列（新库已含，无需执行）
+# ------------------------------------------------------------
+ALTER TABLE `post`
+    ADD COLUMN `dislikeCount` INT DEFAULT 0 COMMENT '拉踩(踩)数(热度公式负向降权, 权重默认-1)' AFTER `likeCount`,
+    ADD COLUMN `reportCount` INT DEFAULT 0 COMMENT '举报数(热度公式负向重扣, 权重默认-5)' AFTER `dislikeCount`;
 

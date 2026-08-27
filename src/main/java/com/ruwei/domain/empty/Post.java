@@ -101,6 +101,16 @@ public class Post implements Serializable {
     private Integer shareCount;
 
     /**
+     * 拉踩(踩)数(热度公式负向降权, 权重默认-1)
+     */
+    private Integer dislikeCount;
+
+    /**
+     * 举报数(热度公式负向重扣, 权重默认-5)
+     */
+    private Integer reportCount;
+
+    /**
      * 热度分 
      */
     private BigDecimal score;
