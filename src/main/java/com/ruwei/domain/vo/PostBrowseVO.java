@@ -88,6 +88,11 @@ public class PostBrowseVO implements Serializable {
     private Boolean isLiked;
 
     /**
+     * 是否已收藏（当前登录用户，列表装配 fillIsCollected 填充）
+     */
+    private Boolean isCollected;
+
+    /**
      * 浏览数
      */
     private Integer viewCount;

@@ -237,4 +237,64 @@ public interface PostService extends IService<Post> {
      * @param id 草稿记录内部主键
      */
     void deleteDraft(Long id);
+
+    /**
+     * 浏览埋点：详情页打开时调用一次（仅登录用户生效）。
+     *
+     * <p><b>游客不参与</b>：未登录直接忽略（不累加 viewCount、不写浏览历史），
+     * 避免「打开 API 文档/爬虫/游客逛帖」污染统计。登录用户：viewCount 原子 +1
+     * （{@code CountUtils.increment}），并 upsert 写浏览历史（去重累计，重复浏览只刷新 lastViewAt）。</p>
+     *
+     * @param id 帖子内部主键
+     */
+    void recordView(Long id);
+
+    /**
+     * 我的浏览历史（需登录，本人视角）：按<b>最近一次浏览时间倒序</b>分页返回。
+     *
+     * <p>先分页查 {@code view_history}（orderBy lastViewAt DESC），再批量查帖，
+     * 过滤已删除/非已发布；因 IN 查询结果无序，按 view_history 原始顺序重排后装配
+     * {@link PostBrowseVO}（作者信息批量查询避免 N+1，复用列表装配逻辑）。</p>
+     *
+     * <p><b>total 语义</b>：保持 view_history 总条数（含已被删/下架帖的占位计数），
+     * 帖子被作者删除/下架后不再展示，实际返回可能略少于 pageSize。</p>
+     *
+     * @param current  页码（从 1 开始）
+     * @param pageSize 每页条数
+     * @return 浏览历史分页结果（PostBrowseVO）
+     */
+    IPage<PostBrowseVO> listViewedPosts(long current, long pageSize);
+
+    /**
+     * 我的收藏列表（需登录，本人视角）：按<b>收藏时间倒序</b>分页返回。
+     *
+     * <p>先分页查 {@code post_collect}（orderBy createdAt DESC，folderId=0 默认收藏夹），
+     * 再批量查帖、过滤已删除/非已发布，按收藏顺序重排后复用列表装配
+     * （{@code buildPostBrowseVO} + {@code fillIsLiked} + {@code fillIsCollected}）。
+     * 与 {@link #listViewedPosts(long, long)} 同构。</p>
+     *
+     * @param current  页码（从 1 开始）
+     * @param pageSize 每页条数
+     * @return 我的收藏分页结果（PostBrowseVO）
+     */
+    IPage<PostBrowseVO> listMyCollect(long current, long pageSize);
+
+    /**
+     * 站外分享埋点：shareCount 原子 +1，并写分享流水（channel 渠道，无接收者，不通知）。
+     *
+     * <p>分享是离散动作（可重复），不建关系表、无取消动作；前端在分享成功回调（或点击分享按钮）时调用。</p>
+     *
+     * @param id      帖子内部主键
+     * @param channel 站外渠道（0未知 1微信 2朋友圈 3QQ 4微博 5复制链接），可空（缺省 0）
+     */
+    void recordShare(Long id, Integer channel);
+
+    /**
+     * 站内分享给指定用户：shareCount 原子 +1、写分享流水（targetUserId），
+     * 事务提交后发布 {@code ShareEvent} 通知接收者（type=8，按天幂等）。
+     *
+     * @param id           帖子内部主键
+     * @param targetUserId 接收者内部 id（校验存在且非自己）
+     */
+    void recordShareTo(Long id, Long targetUserId);
 }

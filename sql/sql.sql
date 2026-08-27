@@ -300,6 +300,7 @@ CREATE TABLE `userBehavior` (
                                 KEY `idxCreated` (`createdAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户行为日志';
 
+#用户长期兴趣画像
 CREATE TABLE `user_interest` (
                                  `id` BIGINT NOT NULL COMMENT '主键(雪花 ASSIGN_ID)',
                                  `userId` BIGINT NOT NULL COMMENT '用户内部id(=loginId)',
@@ -343,4 +344,65 @@ VALUES (1.0, 2.0, 3.0, 4.0, -1.0, -5.0, 48.0);
 ALTER TABLE `post`
     ADD COLUMN `dislikeCount` INT DEFAULT 0 COMMENT '拉踩(踩)数(热度公式负向降权, 权重默认-1)' AFTER `likeCount`,
     ADD COLUMN `reportCount` INT DEFAULT 0 COMMENT '举报数(热度公式负向重扣, 权重默认-5)' AFTER `dislikeCount`;
+
+# ------------------------------------------------------------
+# 12. 用户浏览历史表（去重状态表，upsert 累计；userBehavior 行为流水保持不动）
+#     语义：每 (userId, postId) 一行 —— 首次浏览插入(viewCount=1)，再次浏览由
+#     ViewHistoryMapper.upsertView 走 ON DUPLICATE KEY UPDATE 累计次数 + 刷新 lastViewAt；
+#     「我的浏览历史」列表按 lastViewAt DESC（最近一次浏览优先）查询。
+#     游客不写本表（POST /post/{id}/view 内部对未登录直接忽略，也不累加 viewCount）。
+# ------------------------------------------------------------
+CREATE TABLE `view_history` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(代码层雪花ASSIGN_ID, DB自增仅兜底)',
+  `userId` BIGINT NOT NULL COMMENT '浏览者内部id(=loginId)',
+  `postId` BIGINT NOT NULL COMMENT '帖子内部id',
+  `viewCount` INT NOT NULL DEFAULT 1 COMMENT '累计浏览次数(每次浏览+1)',
+  `lastViewAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最近一次浏览时间',
+  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '首次浏览时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ukUserPost` (`userId`,`postId`),
+  KEY `idxUserLast` (`userId`,`lastViewAt`),
+  KEY `idxPost` (`postId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户浏览历史表(按用户+帖子去重, upsert累计次数)';
+
+# ------------------------------------------------------------
+# 13. 帖子收藏表（物理删 toggle；folderId 预留收藏夹分组）
+#     语义：folderId=0 表示「默认收藏夹」（Phase 1 未分组，代码写死 0）；
+#           用 0 而非 NULL 是因为 MySQL 唯一索引里 NULL 不参与唯一约束（多个 NULL 不冲突），
+#           会导致 Phase 1 防重失效。未来做收藏夹时 folder 表 id 从 1 自增，0 留给默认夹，
+#           同一帖子可收进多个收藏夹由 ukUserPostFolder 天然支持，无需 ALTER。
+#     收藏/取消 = insert/delete（物理删），collectCount 由 CountUtils 原子增减；
+#     收藏不通知作者（私密行为，notification type=7 预留但暂不启用）。
+# ------------------------------------------------------------
+CREATE TABLE `post_collect` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(代码层雪花ASSIGN_ID, DB自增仅兜底)',
+  `postId` BIGINT NOT NULL COMMENT '帖子内部id',
+  `userId` BIGINT NOT NULL COMMENT '收藏者内部id(=loginId)',
+  `folderId` BIGINT NOT NULL DEFAULT 0 COMMENT '收藏夹id: 0=默认收藏夹(Phase1未分组, 预留列)',
+  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ukUserPostFolder` (`userId`,`postId`,`folderId`),
+  KEY `idxUserCreated` (`userId`,`createdAt`),
+  KEY `idxPost` (`postId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子收藏表(物理删toggle, folderId预留收藏夹)';
+
+# ------------------------------------------------------------
+# 14. 帖子分享流水表（站外分发 / 站内分享，可重复分享无唯一键）
+#     语义：channel 与 targetUserId 二选一 ——
+#           站外分享 channel=1微信/2朋友圈/3QQ/4微博/5复制链接, targetUserId=NULL, 不通知；
+#           站内分享 channel=0, targetUserId=接收者, 通知接收者(type=8 转发/分享, 按天幂等)。
+#     分享是离散动作(可重复)，非收藏那种"一人一帖一条"关系，故无唯一键、纯流水。
+# ------------------------------------------------------------
+CREATE TABLE `post_share` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键(代码层雪花ASSIGN_ID, DB自增仅兜底)',
+  `postId` BIGINT NOT NULL COMMENT '帖子内部id',
+  `userId` BIGINT NOT NULL COMMENT '分享者内部id(=loginId)',
+  `channel` TINYINT DEFAULT 0 COMMENT '站外分享渠道: 0未知 1微信 2朋友圈 3QQ 4微博 5复制链接',
+  `targetUserId` BIGINT DEFAULT NULL COMMENT '站内分享接收者内部id(站外分享为NULL)',
+  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '分享时间',
+  PRIMARY KEY (`id`),
+  KEY `idxPost` (`postId`),
+  KEY `idxUserCreated` (`userId`,`createdAt`),
+  KEY `idxTarget` (`targetUserId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子分享流水表(站外分发/站内分享, 可重复分享无唯一键)';
 

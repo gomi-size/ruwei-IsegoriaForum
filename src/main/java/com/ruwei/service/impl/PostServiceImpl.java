@@ -19,6 +19,7 @@ import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.component.notification.event.AdminEvent;
 import com.ruwei.component.notification.event.PostEvent;
+import com.ruwei.component.notification.event.ShareEvent;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
@@ -35,6 +36,7 @@ import com.ruwei.domain.vo.TagVO;
 import com.ruwei.es.event.PostIndexEvent;
 import com.ruwei.es.service.EsPostSyncService;
 import com.ruwei.mapper.PostMapper;
+import com.ruwei.mapper.PostShareMapper;
 import com.ruwei.service.AuditlogService;
 import com.ruwei.service.BoardService;
 import com.ruwei.service.LikeService;
@@ -42,9 +44,12 @@ import com.ruwei.service.PostImageService;
 import com.ruwei.service.PostService;
 import com.ruwei.service.PostTagService;
 import com.ruwei.service.TagService;
+import com.ruwei.service.CollectService;
 import com.ruwei.service.UserFollowService;
 import com.ruwei.service.UserService;
+import com.ruwei.service.ViewHistoryService;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
@@ -78,6 +83,7 @@ import java.util.stream.Collectors;
 *   <li>对外编码 postCode 基于 Redis 原子自增（key {@code isegoria:post:code:counter}，前缀 P）。</li>
 * </ul>
 */
+@Slf4j
 @Service
 public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     implements PostService{
@@ -120,6 +126,21 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    private ViewHistoryService viewHistoryService;
+
+    /**
+     * 收藏服务：列表批量装配 isCollected。
+     * {@code @Lazy} 打破与 CollectServiceImpl（注入 PostService）的循环依赖。
+     */
+    @Resource
+    @Lazy
+    private CollectService collectService;
+
+    /** 帖子分享流水表（站外/站内分享埋点直插，无关系语义） */
+    @Resource
+    private PostShareMapper postShareMapper;
 
     /**
      * 点赞服务：列表批量装配 isLiked。
@@ -796,8 +817,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
-        // 当前登录用户批量装配 isLiked（Redis pipeline，缺失回源 DB；未登录跳过）
+        // 当前登录用户批量装配 isLiked / isCollected（未登录跳过）
         fillIsLiked(voList);
+        fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
@@ -876,8 +898,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
-        // 当前登录用户批量装配 isLiked（Redis pipeline，缺失回源 DB）
+        // 当前登录用户批量装配 isLiked / isCollected
         fillIsLiked(voList);
+        fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(voList);
         return result;
@@ -1516,5 +1539,197 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 ? PostIndexEvent.Action.INDEX
                 : PostIndexEvent.Action.DELETE;
         eventPublisher.publishEvent(new PostIndexEvent(this, postId, action));
+    }
+
+    /**
+     * 浏览埋点：详情页打开时调用一次（仅登录用户生效）。
+     *
+     * <p><b>游客不参与</b>：未登录直接忽略，不累加 viewCount、不写浏览历史
+     * （接口虽 {@code @SaIgnore} 放行，但这里静默返回，避免游客请求触发 401 弹登录）。
+     * 登录用户：viewCount 原子 +1（{@link CountUtils#increment}），
+     * 并 upsert 写浏览历史（写失败仅告警，不影响浏览主流程）。</p>
+     */
+    @Override
+    public void recordView(Long id) {
+        // 游客不参与浏览统计
+        if (!StpUtil.isLogin()) {
+            return;
+        }
+        Post post = getById(id);
+        ThrowUtils.throwIf(post == null || !Objects.equals(post.getStatus(), PostStatusEnum.PUBLISHED.getCode()),
+                ErrorCode.NOT_FOUND_ERROR, "帖子不存在或未发布");
+        // viewCount 原子 +1
+        CountUtils.increment(this, Post::getId, id, "viewCount", 1);
+        // 浏览历史 upsert（去重累计，重复浏览只刷新 lastViewAt）
+        try {
+            viewHistoryService.record(StpUtil.getLoginIdAsLong(), id);
+        } catch (Exception e) {
+            log.warn("浏览历史记录失败 postId={}: {}", id, e.getMessage());
+        }
+    }
+
+    /**
+     * 我的浏览历史（需登录，本人视角）：按<b>最近一次浏览时间倒序</b>分页返回。
+     *
+     * <p>流程：分页查 {@code view_history}（orderBy lastViewAt DESC）→ 批量查帖并过滤
+     * 已删除/非已发布 → 因 IN 查询结果无序，按 view_history 原顺序重排 → 复用列表装配
+     * （作者信息批量查 + {@code fillIsLiked}）。</p>
+     *
+     * <p><b>total 语义</b>：保持 view_history 总条数（含已删/下架帖占位），
+     * 被删/下架帖不展示，实际返回可能略少于 pageSize。</p>
+     */
+    @Override
+    public IPage<PostBrowseVO> listViewedPosts(long current, long pageSize) {
+        Long loginId = StpUtil.getLoginIdAsLong();
+        // 1. 分页查浏览历史，最近浏览优先
+        Page<ViewHistory> vhPage = viewHistoryService.lambdaQuery()
+                .eq(ViewHistory::getUserId, loginId)
+                .orderByDesc(ViewHistory::getLastViewAt)
+                .page(new Page<>(current, pageSize));
+        List<Long> postIds = vhPage.getRecords().stream().map(ViewHistory::getPostId).toList();
+        if (postIds.isEmpty()) {
+            return new Page<>(current, pageSize);
+        }
+        // 2. 批量查帖 + 过滤已删除/非已发布
+        List<Post> posts = listByIds(postIds).stream()
+                .filter(p -> Objects.equals(p.getStatus(), PostStatusEnum.PUBLISHED.getCode()))
+                .toList();
+        // 3. IN 查询无序，按 view_history 原顺序重排
+        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+        List<Post> ordered = postIds.stream().map(byId::get).filter(Objects::nonNull).toList();
+        if (ordered.isEmpty()) {
+            IPage<PostBrowseVO> empty = new Page<>(vhPage.getCurrent(), vhPage.getSize(), vhPage.getTotal());
+            empty.setRecords(List.of());
+            return empty;
+        }
+        // 4. 复用列表装配：作者信息批量查 + fillIsLiked
+        List<Long> authorIds = ordered.stream().map(Post::getUserId).distinct().toList();
+        Map<Long, User> userMap = userService.listByIds(authorIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+        List<PostBrowseVO> voList = ordered.stream()
+                .map(p -> buildPostBrowseVO(p, userMap))
+                .toList();
+        fillIsLiked(voList);
+        fillIsCollected(voList);
+        IPage<PostBrowseVO> result = new Page<>(vhPage.getCurrent(), vhPage.getSize(), vhPage.getTotal());
+        result.setRecords(voList);
+        return result;
+    }
+
+    /**
+     * 我的收藏列表（需登录，本人视角）：按<b>收藏时间倒序</b>分页返回。
+     *
+     * <p>流程：分页查 post_collect（orderBy createdAt DESC，folderId=0 默认收藏夹）→
+     * 批量查帖并过滤已删除/非已发布 → 按收藏顺序重排 → 复用列表装配
+     * （buildPostBrowseVO + fillIsLiked + fillIsCollected）。与 listViewedPosts 同构。</p>
+     */
+    @Override
+    public IPage<PostBrowseVO> listMyCollect(long current, long pageSize) {
+        Long loginId = StpUtil.getLoginIdAsLong();
+        // 1. 分页查我的收藏关系（默认收藏夹），最近收藏优先
+        IPage<PostCollect> collectPage = collectService.pageMyCollect(loginId, current, pageSize);
+        List<Long> postIds = collectPage.getRecords().stream().map(PostCollect::getPostId).toList();
+        if (postIds.isEmpty()) {
+            return new Page<>(current, pageSize);
+        }
+        // 2. 批量查帖 + 过滤已删除/非已发布
+        List<Post> posts = listByIds(postIds).stream()
+                .filter(p -> Objects.equals(p.getStatus(), PostStatusEnum.PUBLISHED.getCode()))
+                .toList();
+        // 3. IN 查询无序，按收藏顺序重排
+        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+        List<Post> ordered = postIds.stream().map(byId::get).filter(Objects::nonNull).toList();
+        if (ordered.isEmpty()) {
+            IPage<PostBrowseVO> empty = new Page<>(collectPage.getCurrent(), collectPage.getSize(), collectPage.getTotal());
+            empty.setRecords(List.of());
+            return empty;
+        }
+        // 4. 复用列表装配
+        List<Long> authorIds = ordered.stream().map(Post::getUserId).distinct().toList();
+        Map<Long, User> userMap = userService.listByIds(authorIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+        List<PostBrowseVO> voList = ordered.stream()
+                .map(p -> buildPostBrowseVO(p, userMap))
+                .toList();
+        fillIsLiked(voList);
+        fillIsCollected(voList);
+        IPage<PostBrowseVO> result = new Page<>(collectPage.getCurrent(), collectPage.getSize(), collectPage.getTotal());
+        result.setRecords(voList);
+        return result;
+    }
+
+    /**
+     * 列表批量装配「是否已收藏」（一次 IN 查，无 N+1；未登录跳过）。
+     * 对称于 {@link #fillIsLiked(List)}，数据源为 post_collect 表。
+     */
+    private void fillIsCollected(List<PostBrowseVO> voList) {
+        if (voList == null || voList.isEmpty() || !StpUtil.isLogin()) {
+            return;
+        }
+        long loginId = StpUtil.getLoginIdAsLong();
+        List<Long> postIds = voList.stream()
+                .map(PostBrowseVO::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (postIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Boolean> collectedMap = collectService.batchIsCollected(postIds, loginId);
+        voList.forEach(vo -> {
+            if (vo.getId() != null) {
+                vo.setIsCollected(collectedMap.getOrDefault(vo.getId(), false));
+            }
+        });
+    }
+
+    /**
+     * 站外分享埋点：shareCount 原子 +1 + 写分享流水（channel 渠道，无接收者，不通知）。
+     *
+     * <p>分享是离散动作（可重复），事务内保证「计数 + 流水」原子性；前端在分享成功回调时调用。</p>
+     */
+    @Override
+    @Transactional
+    public void recordShare(Long id, Integer channel) {
+        Long loginId = StpUtil.getLoginIdAsLong();
+        Post post = getById(id);
+        ThrowUtils.throwIf(post == null || !Objects.equals(post.getStatus(), PostStatusEnum.PUBLISHED.getCode()),
+                ErrorCode.NOT_FOUND_ERROR, "帖子不存在或未发布");
+        // shareCount 原子 +1
+        CountUtils.increment(this, Post::getId, id, "shareCount", 1);
+        // 写分享流水（站外，无接收者）
+        PostShare ps = new PostShare();
+        ps.setPostId(id);
+        ps.setUserId(loginId);
+        ps.setChannel(channel == null ? 0 : channel);
+        ps.setTargetUserId(null);
+        postShareMapper.insert(ps);
+    }
+
+    /**
+     * 站内分享给指定用户：shareCount 原子 +1 + 写分享流水（targetUserId），
+     * 事务提交后发布 {@link ShareEvent} 异步通知接收者（type=8，按天幂等）。
+     */
+    @Override
+    @Transactional
+    public void recordShareTo(Long id, Long targetUserId) {
+        Long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(targetUserId == null, ErrorCode.PARAMS_ERROR, "接收用户不能为空");
+        ThrowUtils.throwIf(Objects.equals(loginId, targetUserId), ErrorCode.PARAMS_ERROR, "不能分享给自己");
+        User target = userService.getById(targetUserId);
+        ThrowUtils.throwIf(target == null, ErrorCode.NOT_FOUND_ERROR, "接收用户不存在");
+        Post post = getById(id);
+        ThrowUtils.throwIf(post == null || !Objects.equals(post.getStatus(), PostStatusEnum.PUBLISHED.getCode()),
+                ErrorCode.NOT_FOUND_ERROR, "帖子不存在或未发布");
+        // shareCount 原子 +1
+        CountUtils.increment(this, Post::getId, id, "shareCount", 1);
+        // 写分享流水（站内，有接收者）
+        PostShare ps = new PostShare();
+        ps.setPostId(id);
+        ps.setUserId(loginId);
+        ps.setChannel(0);
+        ps.setTargetUserId(targetUserId);
+        postShareMapper.insert(ps);
+        // 事务提交后异步通知接收者（type=8 转发/分享）
+        eventPublisher.publishEvent(new ShareEvent(this, loginId, id, targetUserId));
     }
 }

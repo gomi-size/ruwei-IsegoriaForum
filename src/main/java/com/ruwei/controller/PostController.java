@@ -183,5 +183,54 @@ public class PostController {
         return ResultUtils.success(postService.listFollowPosts(pageRequest.getCurrent(), pageRequest.getPageSize()));
     }
 
+    /**
+     * 浏览埋点：详情页打开时调用一次（仅登录用户生效，游客静默忽略）。
+     *
+     * <p>{@code @SaIgnore} 与 {@code GET /post/{id}} 口径一致——游客可浏览公开帖，但<b>不参与</b>
+     * 浏览统计（viewCount 不累加、浏览历史不写入），由 {@code PostServiceImpl.recordView} 内部
+     * 对未登录直接返回。限流对齐发帖口径，防刷量。</p>
+     */
+    @PostMapping("/{id}/view")
+    @SaIgnore
+    @RateLimit(limit = 10, window = 60, prefix = "view")
+    public BaseResponse<String> recordView(@PathVariable Long id) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.recordView(id);
+        return ResultUtils.success("ok");
+    }
+
+    /**
+     * 我的浏览历史（需登录，本人视角）：按<b>最近一次浏览时间倒序</b>分页返回。
+     *
+     * <p>返回列表专用 {@link PostBrowseVO}（去重后每帖一条，重复浏览只刷新排序位置，
+     * 不产生重复卡片）。</p>
+     */
+    @PostMapping("/viewedList")
+    public BaseResponse<IPage<PostBrowseVO>> listViewedPosts(@RequestBody PageRequest pageRequest) {
+        return ResultUtils.success(postService.listViewedPosts(pageRequest.getCurrent(), pageRequest.getPageSize()));
+    }
+
+    /**
+     * 站外分享埋点：详情页分享成功后回调（channel 渠道可选，0未知 1微信 2朋友圈 3QQ 4微博 5复制链接）。
+     */
+    @PostMapping("/{id}/share")
+    @RateLimit(limit = 10, window = 60, prefix = "share")
+    public BaseResponse<String> recordShare(@PathVariable Long id, @RequestParam(required = false) Integer channel) {
+        ThrowUtils.throwIf(id == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.recordShare(id, channel);
+        return ResultUtils.success("ok");
+    }
+
+    /**
+     * 站内分享给指定用户（需登录）：shareCount+1 + 写流水 + 通知接收者。
+     */
+    @PostMapping("/{id}/shareTo")
+    @RateLimit(limit = 10, window = 60, prefix = "share")
+    public BaseResponse<String> recordShareTo(@PathVariable Long id, @RequestParam Long targetUserId) {
+        ThrowUtils.throwIf(id == null || targetUserId == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.recordShareTo(id, targetUserId);
+        return ResultUtils.success("ok");
+    }
+
 
 }
