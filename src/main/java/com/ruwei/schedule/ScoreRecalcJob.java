@@ -8,6 +8,7 @@ import com.ruwei.manager.ScoreConfigManager;
 import com.ruwei.service.PostService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -25,6 +26,7 @@ public class ScoreRecalcJob {
     @Resource
     private ScoreConfigManager scoreConfigManager;
 
+    @Scheduled(cron = "0 */5 * * * *")
     public void recalc(){
         //1.分页去全量【已发布】，并且是已公开
         long current=1;
