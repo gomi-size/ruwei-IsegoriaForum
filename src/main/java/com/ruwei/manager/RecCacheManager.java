@@ -12,8 +12,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.bouncycastle.asn1.x500.style.RFC4519Style.uid;
-
 @Slf4j
 @Component
 public class RecCacheManager {
@@ -100,7 +98,7 @@ public class RecCacheManager {
      * @param delta  增量（强信号 +1、浏览弱信号 +0.2、负反馈 -1）
      */
     public void incrInterest(Long userId,int dim,String value ,double delta){
-        String key = INTEREST + uid + ":" + dim + ":" + value;
+        String key = INTEREST + userId + ":" + dim + ":" + value;
         redis.opsForValue().increment(key,delta);
         redis.expire(key,INT_TTL);
     }

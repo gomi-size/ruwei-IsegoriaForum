@@ -24,6 +24,7 @@ import com.ruwei.manager.RecCacheManager;
 import com.ruwei.service.*;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
  * 防雪花精度丢失），首屏不传；返回 List&lt;PostBrowseVO&gt;，前端取本页最后一条的 id 作下次 cursor，
  * 返回条数 &lt; pageSize 即无更多。</p>
  */
+@Service
 public class RecServiceImpl implements RecService {
 
     // ---- 精排亲和系数（application.yml rec.* 收口，调参无需改代码） ----
@@ -138,14 +140,10 @@ public class RecServiceImpl implements RecService {
         }
 
 
-        //粗排1/2：曝光去重(仅登录用户；游客直接全部返回)
-        //这个主要是剔除已经曝光的
-        Set<Long> unexposed = guest ? candidateIds : recCacheManager.filterExposed(loginId, candidateIds);
-        if (unexposed.isEmpty()) {
-            return List.of();
-        }
-        // 粗排 2/2：批量取帖（@TableLogic 自动过滤已删）→ 状态双保险 → 热度降序截断 Top N
-        List<Post> posts = postService.listByIds(unexposed).stream().filter(this::isRecommendable)
+        // 粗排：批量取帖（@TableLogic 自动过滤已删）→ 状态双保险 → 热度降序截断 Top N
+        // 注意：此处不剔除已曝光帖——游标定位需要「含已曝光的全量精排序列」保持跨页稳定，
+        // 曝光剔除下沉到下面的「取页」阶段（跳过已曝光 + 顺延补齐 pageSize 条）
+        List<Post> posts = postService.listByIds(candidateIds).stream().filter(this::isRecommendable)
                 .sorted(Comparator.comparingDouble(this::hotScore).reversed())
                 .toList();
 
@@ -164,21 +162,53 @@ public class RecServiceImpl implements RecService {
                 .sorted(Comparator.comparingDouble(Scored::pScore).reversed())
                 .toList();
 
-        // 重排 1/4：游标定位（页间只按 pScore 序前进；score 5 分钟重算致顺序微变时兜底回首屏）
+        // 重排 1/4：游标定位（在全量精排序列中定位，序列含已曝光帖 → cursor 精确匹配不失效）
         int start = locateCursor(scored, req.getCursor());
         if(start>=scored.size()){
             return List.of();
         }
-        List<Scored> page = scored.subList(start, Math.min(start + pageSize, scored.size()));
+        // 重排 2/4：取页 = 从 start 起跳过已曝光帖、顺延补齐 pageSize 条
+        // 游客无曝光档案直接取连续页；登录用户剔除已曝光（一次 pipeline 判定尾部全部候选）
+        List<Post> pagePosts = new ArrayList<>();
+        if (guest) {
+            for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
+                pagePosts.add(scored.get(i).post());
+            }
+        } else {
+            List<Long> tailIds = new ArrayList<>();
+            for (int i = start; i < scored.size(); i++) {
+                tailIds.add(scored.get(i).post().getId());
+            }
+            Set<Long> unexposed = tailIds.isEmpty() ? Set.of()
+                    : recCacheManager.filterExposed(loginId, tailIds);   // 保序返回未曝光 id
+            // 第一轮：未曝光帖优先（7 天去重语义，翻页/刷新给新内容）
+            for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
+                if (unexposed.contains(scored.get(i).post().getId())) {
+                    pagePosts.add(scored.get(i).post());
+                }
+            }
+            // 第二轮：未曝光不足 pageSize 时，已曝光帖按 pScore 序补位——
+            // 内容池小 + 7 天曝光去重耗尽时兜底，保证首页/翻页永不空白（宁可重复不可空屏）
+            if (pagePosts.size() < pageSize) {
+                for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
+                    if (!unexposed.contains(scored.get(i).post().getId())) {
+                        pagePosts.add(scored.get(i).post());
+                    }
+                }
+            }
+        }
+        if (pagePosts.isEmpty()) {
+            return List.of();
+        }
 
-        //重排 2/4：页内重排（isTop 强插 → 同作者打散 → 冷启动注入位 5/8）
-        List<Post> reordered = rerank(page, coldIds);
+        //重排 3/4：页内重排（同作者打散 → 冷启动注入位 5/8）
+        List<Post> reordered = rerank(pagePosts, coldIds);
 
-        //重排 3/4：曝光回写（仅登录用户）,下一次就不曝光了
+        //重排 4/4：曝光回写（仅登录用户，服务端保底；前端 recordExposure 上报幂等补强）
         if(!guest){
             recCacheManager.addExposures(loginId,reordered.stream().map(Post::getId).toList());
         }
-        // 重排 4/4：自建装配（同构 PostServiceImpl，不动其 private 方法）
+        // 自建装配（同构 PostServiceImpl，不动其 private 方法）
         return assemble(reordered, loginId);
     }
 
@@ -228,6 +258,9 @@ public class RecServiceImpl implements RecService {
         userbehaviorService.save(ub);
         // 2. 短期兴趣降权：该帖全部兴趣维度 INCR -1（读取侧 max(0) 兜底，Phase 1 接受负值，§10.3）
         incrInterestsOfPost(loginId, post, -1.0);
+        // 3. 曝光屏蔽：负反馈帖直接写入曝光集合（7 天内不再进入推荐流，等价「看过了且不感兴趣」，
+        //    与 feed 页内自动回写同一 ZSet，ZADD 幂等无副作用）
+        recCacheManager.addExposures(loginId, List.of(postId));
     }
 
     /** 帖子 → 兴趣维度批量 INCR（dim2 标签 / dim3 类型 / dim4 板块 / dim5 作者）。 */
@@ -473,13 +506,11 @@ public class RecServiceImpl implements RecService {
     }
 
     /**
-     * 页内重排：isTop 强插 → 同作者打散（≤2 连续）→ 冷启动注入位 5/8。
+     * 页内重排：同作者打散（≤2 连续）→ 冷启动注入位 5/8。
      * 只调整页内顺序，不影响游标语义（§6.5）。
+     * 入参为调用方已剔除曝光、顺延补齐的页内 Post 列表（直接原地重排，不复制）。
      */
-    private List<Post> rerank(List<Scored> page,Set<Long> coldIds){
-        //先获取帖子
-        List<Post> list = new ArrayList<>(page.stream().map(Scored::post).toList());
-
+    private List<Post> rerank(List<Post> list, Set<Long> coldIds){
         //同作者打散：第 3 个连续同作者帖与后方首个异作者帖交换（至多交换，不丢帖）
         for (int i = 2; i < list.size(); i++) {
             Long cur = list.get(i).getUserId();

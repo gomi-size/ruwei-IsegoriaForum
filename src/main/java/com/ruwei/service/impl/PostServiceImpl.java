@@ -1572,6 +1572,17 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 StpUtil.getLoginIdAsLong(), id, post.getTopic(), post.getType(), post.getBoardId()));
     }
 
+    @Override
+    public void removeViewed(Long postId) {
+        ThrowUtils.throwIf(postId == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        viewHistoryService.removeOne(StpUtil.getLoginIdAsLong(), postId);
+    }
+
+    @Override
+    public void clearViewed() {
+        viewHistoryService.clearAll(StpUtil.getLoginIdAsLong());
+    }
+
     /**
      * 我的浏览历史（需登录，本人视角）：按<b>最近一次浏览时间倒序</b>分页返回。
      *
@@ -1599,7 +1610,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .filter(p -> Objects.equals(p.getStatus(), PostStatusEnum.PUBLISHED.getCode()))
                 .toList();
         // 3. IN 查询无序，按 view_history 原顺序重排
-        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+        //    toMap 必须带合并函数：重复 key 时会抛 IllegalStateException（防 IN 查询返回重复行/脏数据）
+        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p, (a, b) -> a));
         List<Post> ordered = postIds.stream().map(byId::get).filter(Objects::nonNull).toList();
         if (ordered.isEmpty()) {
             IPage<PostBrowseVO> empty = new Page<>(vhPage.getCurrent(), vhPage.getSize(), vhPage.getTotal());
@@ -1609,7 +1621,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         // 4. 复用列表装配：作者信息批量查 + fillIsLiked
         List<Long> authorIds = ordered.stream().map(Post::getUserId).distinct().toList();
         Map<Long, User> userMap = userService.listByIds(authorIds).stream()
-                .collect(Collectors.toMap(User::getId, u -> u));
+                .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();
@@ -1641,7 +1653,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
                 .filter(p -> Objects.equals(p.getStatus(), PostStatusEnum.PUBLISHED.getCode()))
                 .toList();
         // 3. IN 查询无序，按收藏顺序重排
-        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+        //    toMap 必须带合并函数：重复 key 时会抛 IllegalStateException（防 IN 查询返回重复行/脏数据）
+        Map<Long, Post> byId = posts.stream().collect(Collectors.toMap(Post::getId, p -> p, (a, b) -> a));
         List<Post> ordered = postIds.stream().map(byId::get).filter(Objects::nonNull).toList();
         if (ordered.isEmpty()) {
             IPage<PostBrowseVO> empty = new Page<>(collectPage.getCurrent(), collectPage.getSize(), collectPage.getTotal());
@@ -1651,7 +1664,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         // 4. 复用列表装配
         List<Long> authorIds = ordered.stream().map(Post::getUserId).distinct().toList();
         Map<Long, User> userMap = userService.listByIds(authorIds).stream()
-                .collect(Collectors.toMap(User::getId, u -> u));
+                .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();

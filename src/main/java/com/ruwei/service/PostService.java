@@ -266,6 +266,22 @@ public interface PostService extends IService<Post> {
     IPage<PostBrowseVO> listViewedPosts(long current, long pageSize);
 
     /**
+     * 删除单条浏览记录（需登录，仅能删自己的）。
+     *
+     * <p>按唯一键 ukUserPost(userId, postId) 物理删除一行；带 userId 条件防越权删他人记录。</p>
+     *
+     * @param postId 帖子内部主键
+     */
+    void removeViewed(Long postId);
+
+    /**
+     * 清空本人全部浏览历史（需登录）。
+     *
+     * <p>高危操作：只删当前登录用户的行（ViewHistoryService.clearAll 内部强制带 userId 条件）。</p>
+     */
+    void clearViewed();
+
+    /**
      * 我的收藏列表（需登录，本人视角）：按<b>收藏时间倒序</b>分页返回。
      *
      * <p>先分页查 {@code post_collect}（orderBy createdAt DESC，folderId=0 默认收藏夹），

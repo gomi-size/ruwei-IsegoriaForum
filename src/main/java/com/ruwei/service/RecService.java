@@ -5,6 +5,7 @@ import com.ruwei.domain.dto.RecExposureDTO;
 import com.ruwei.domain.dto.RecFeedbackDTO;
 import com.ruwei.domain.dto.RecFeedDTO;
 import com.ruwei.domain.vo.PostBrowseVO;
+import org.springframework.stereotype.Service;
 
 import java.util.List;
 

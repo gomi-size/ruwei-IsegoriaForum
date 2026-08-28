@@ -211,6 +211,27 @@ public class PostController {
     }
 
     /**
+     * 删除单条浏览记录（需登录，仅能删自己的）：按 ukUserPost(userId, postId) 物理删除一行。
+     */
+    @PostMapping("/viewed/remove")
+    @RateLimit(limit = 10, window = 60, prefix = "view")
+    public BaseResponse<String> removeViewed(@RequestParam Long postId) {
+        ThrowUtils.throwIf(postId == null, ErrorCode.PARAMS_ERROR, "参数不能为空");
+        postService.removeViewed(postId);
+        return ResultUtils.success("ok");
+    }
+
+    /**
+     * 清空本人全部浏览历史（需登录，只删当前用户的行）。
+     */
+    @PostMapping("/viewed/clear")
+    @RateLimit(limit = 5, window = 60, prefix = "view")
+    public BaseResponse<String> clearViewed() {
+        postService.clearViewed();
+        return ResultUtils.success("ok");
+    }
+
+    /**
      * 站外分享埋点：详情页分享成功后回调（channel 渠道可选，0未知 1微信 2朋友圈 3QQ 4微博 5复制链接）。
      */
     @PostMapping("/{id}/share")
