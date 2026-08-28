@@ -9,6 +9,6 @@ import com.ruwei.domain.empty.userBehavior;
 * @description 针对表【userbehavior(用户行为日志)】的数据库操作Service
 * @createDate 2026-08-26 09:41:52
 */
-public interface userbehaviorService extends IService<userBehavior> {
+public interface UserbehaviorService extends IService<userBehavior> {
 
 }

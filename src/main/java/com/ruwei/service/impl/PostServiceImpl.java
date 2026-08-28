@@ -20,6 +20,7 @@ import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.component.notification.event.AdminEvent;
 import com.ruwei.component.notification.event.PostEvent;
 import com.ruwei.component.notification.event.ShareEvent;
+import com.ruwei.component.notification.event.ViewEvent;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
@@ -1550,6 +1551,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      * 并 upsert 写浏览历史（写失败仅告警，不影响浏览主流程）。</p>
      */
     @Override
+    @Transactional
     public void recordView(Long id) {
         // 游客不参与浏览统计
         if (!StpUtil.isLogin()) {
@@ -1566,6 +1568,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         } catch (Exception e) {
             log.warn("浏览历史记录失败 postId={}: {}", id, e.getMessage());
         }
+        eventPublisher.publishEvent(new ViewEvent(this,
+                StpUtil.getLoginIdAsLong(), id, post.getTopic(), post.getType(), post.getBoardId()));
     }
 
     /**

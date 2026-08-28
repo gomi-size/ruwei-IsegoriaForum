@@ -23,7 +23,7 @@ public class userBehavior implements Serializable {
     /**
      * 用户内部id
      */
-    private Long userid;
+    private Long userId;
 
     /**
      * 帖子内部id

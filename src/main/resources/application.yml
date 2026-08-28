@@ -60,7 +60,7 @@ spring:
           initial-interval: 1000ms
           multiplier: 2.0
   profiles:
-    active: local
+    active: local, sorce   # sorce：推荐模块 rec.* 调参文件（application-sorce.yml）
   # es
   elasticsearch:
     uris: http://localhost:9200
@@ -120,3 +120,4 @@ springdoc:
     - group: 'default'
       paths-to-match: '/**'
       packages-to-scan: com.ruwei.controller
+

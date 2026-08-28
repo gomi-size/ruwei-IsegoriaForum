@@ -1,5 +1,6 @@
 package com.ruwei.manager;
 
+import cn.hutool.core.collection.CollUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.*;
@@ -90,7 +91,14 @@ public class RecCacheManager {
         return result;
     }
 
-    //短期兴趣（String INCR，dim 1话题 2标签 3类型 4板块 5作者）
+    /**
+     * 短期兴趣累加（String INCR，dim 2标签 3类型 4板块 5作者）。
+     *
+     * @param userId 用户内部 id
+     * @param dim    兴趣维度（2标签 3类型 4板块 5作者）
+     * @param value  维度值（tagId / type码 / boardId / authorId）
+     * @param delta  增量（强信号 +1、浏览弱信号 +0.2、负反馈 -1）
+     */
     public void incrInterest(Long userId,int dim,String value ,double delta){
         String key = INTEREST + uid + ":" + dim + ":" + value;
         redis.opsForValue().increment(key,delta);
@@ -98,31 +106,18 @@ public class RecCacheManager {
     }
 
     /**
-     * 取某用户短期兴趣键值令人（供 InterestMergeJob 合并），键不存在返回空
+     * 取某用户短期兴趣键值对（供 InterestMergeJob 合并），键不存在返回空。
+     *
+     * @param userId 用户内部 id
+     * @return {dim:value -> weight}（如 {"2:1800001": 3.2, "3:1": 1.4}）
      */
-    public Map<String, Double> scanShortInterest(Long uid) {
-        String matchPattern = INTEREST + uid + ":*";
-        String prefix = INTEREST + uid + ":"; // 用于后续截取字符串
+    public Map<String, Double> scanShortInterest(Long userId) {
+        String matchPattern = INTEREST + userId + ":*";
+        String prefix = INTEREST + userId + ":"; // 用于后续截取字符串
         Map<String, Double> resultMap = new HashMap<>();
 
         // 1. 使用 SCAN 命令安全地获取匹配的 Keys，防止阻塞 Redis
-        Set<String> keys = redis.execute((RedisCallback<Set<String>>) connection -> {
-            Set<String> tmpKeys = new HashSet<>();
-            ScanOptions options = ScanOptions.scanOptions()
-                    .match(matchPattern)
-                    .count(100) // 每次迭代扫描100个，对于单个用户的兴趣来说足够了
-                    .build();
-
-            // 兼容不同版本的 Spring Data Redis，通常使用 connection.keyCommands().scan 或者 connection.scan
-            try (Cursor<byte[]> cursor = connection.scan(options)) {
-                while (cursor.hasNext()) {
-                    tmpKeys.add(new String(cursor.next(), StandardCharsets.UTF_8));
-                }
-            } catch (Exception e) {
-                // 游标关闭异常可忽略或打日志
-            }
-            return tmpKeys;
-        });
+        Set<String> keys = scanKeys(matchPattern);
 
         if (keys == null || keys.isEmpty()) {
             return resultMap; // 如果没扫描到，直接返回空Map
@@ -143,7 +138,7 @@ public class RecCacheManager {
 
             if (valStr != null) {
                 try {
-                    // 截去前缀 "uinterest:{uid}:" ，提取出 "dim:value"
+                    // 截去前缀 "uinterest:{userId}:" ，提取出 "dim:value"
                     String dimAndValue = fullKey.substring(prefix.length());
                     // 将查出来的字符串权重转成 Double 存入 Map
                     resultMap.put(dimAndValue, Double.parseDouble(valStr));
@@ -156,8 +151,37 @@ public class RecCacheManager {
         return resultMap;
     }
 
-
-
+    /**
+     * 删除某用户全部短期兴趣键（InterestMergeJob 合并进长期画像后清理，防残留）。
+     *
+     * @param uid 用户内部 id
+     */
+    public void deleteShortInterest(Long uid) {
+        Set<String> keys = scanKeys(INTEREST + uid + ":*");
+        if (CollUtil.isNotEmpty(keys)) {
+            redis.delete(keys);
+        }
+    }
+    /**
+     * SCAN 按 pattern 拉键（不阻塞 Redis；单用户前缀量小，COUNT 100 足够）。
+     */
+    private Set<String> scanKeys(String pattern) {
+        return redis.execute((RedisCallback<Set<String>>) connection -> {
+            Set<String> tmpKeys = new HashSet<>();
+            ScanOptions options = ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(100)
+                    .build();
+            try (Cursor<byte[]> cursor = connection.scan(options)) {
+                while (cursor.hasNext()) {
+                    tmpKeys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+                }
+            } catch (Exception e) {
+                log.warn("SCAN 拉键失败 pattern={}: {}", pattern, e.getMessage());
+            }
+            return tmpKeys;
+        });
+    }
 
 
 
