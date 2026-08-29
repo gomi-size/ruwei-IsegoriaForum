@@ -3,6 +3,7 @@ package com.ruwei.domain.dto;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * 推荐流请求（游标分页）。
@@ -29,4 +30,13 @@ public class RecFeedDTO implements Serializable {
      * recommend 综合（四层漏斗）/ discover 热点+冷启动；默认 recommend
      */
     private String tab = "recommend";
+
+    /**
+     * 本会话已曝光/已看的帖子内部 id 列表（前端内存记录，F5 刷新即清空 → 帖子重新出现）。
+     *
+     * <p><b>会话级去重</b>：服务端取页时剔除这些 id 并顺延补齐（保证 pageSize 与游标连续性）；
+     * 负反馈「不感兴趣」由服务端全局屏蔽（feed:exposure:{uid}）负责，不在此列表，
+     * 前端切勿把负反馈帖传回本字段（全局屏蔽优先，补位也不会放出）。游客忽略本字段。</p>
+     */
+    private List<String> exposedIds;
 }

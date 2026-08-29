@@ -168,7 +168,9 @@ public class RecServiceImpl implements RecService {
             return List.of();
         }
         // 重排 2/4：取页 = 从 start 起跳过已曝光帖、顺延补齐 pageSize 条
-        // 游客无曝光档案直接取连续页；登录用户剔除已曝光（一次 pipeline 判定尾部全部候选）
+        // 游客无曝光档案直接取连续页；登录用户双重剔除：
+        //   ① blocked（全局负反馈屏蔽，Redis feed:exposure:{uid}，跨刷新持久，永不补位放出）
+        //   ② sessionExposed（前端本会话已看，内存上传，F5 刷新即重置）
         List<Post> pagePosts = new ArrayList<>();
         if (guest) {
             for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
@@ -179,19 +181,32 @@ public class RecServiceImpl implements RecService {
             for (int i = start; i < scored.size(); i++) {
                 tailIds.add(scored.get(i).post().getId());
             }
-            Set<Long> unexposed = tailIds.isEmpty() ? Set.of()
-                    : recCacheManager.filterExposed(loginId, tailIds);   // 保序返回未曝光 id
-            // 第一轮：未曝光帖优先（7 天去重语义，翻页/刷新给新内容）
+            // ① 全局负反馈屏蔽（跨刷新持久；feed 不再自动回写曝光，此处仅含负反馈帖）
+            Set<Long> blocked = tailIds.isEmpty() ? Set.of()
+                    : recCacheManager.filterExposed(loginId, tailIds);
+            // ② 会话已看（前端本会话上传，刷新即重置）：内存剔除
+            Set<Long> sessionExposed = new HashSet<>();
+            if (CollUtil.isNotEmpty(req.getExposedIds())) {
+                for (String s : req.getExposedIds()) {
+                    if (NumberUtil.isLong(s)) {
+                        sessionExposed.add(Long.valueOf(s));
+                    }
+                }
+            }
+            // 第一轮：未曝光（不在 blocked 且不在 sessionExposed）优先
             for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
-                if (unexposed.contains(scored.get(i).post().getId())) {
+                Long id = scored.get(i).post().getId();
+                if (!blocked.contains(id) && !sessionExposed.contains(id)) {
                     pagePosts.add(scored.get(i).post());
                 }
             }
-            // 第二轮：未曝光不足 pageSize 时，已曝光帖按 pScore 序补位——
-            // 内容池小 + 7 天曝光去重耗尽时兜底，保证首页/翻页永不空白（宁可重复不可空屏）
+            // 第二轮：未曝光不足 pageSize 时，用「会话已看但未被负反馈屏蔽」的帖按 pScore 序补位——
+            // 内容池小 + 会话去重耗尽时兜底，保证首页/翻页永不空白（宁可重复不可空屏）；
+            // blocked（负反馈）永不补位放出
             if (pagePosts.size() < pageSize) {
                 for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
-                    if (!unexposed.contains(scored.get(i).post().getId())) {
+                    Long id = scored.get(i).post().getId();
+                    if (!blocked.contains(id) && sessionExposed.contains(id)) {
                         pagePosts.add(scored.get(i).post());
                     }
                 }
@@ -204,31 +219,22 @@ public class RecServiceImpl implements RecService {
         //重排 3/4：页内重排（同作者打散 → 冷启动注入位 5/8）
         List<Post> reordered = rerank(pagePosts, coldIds);
 
-        //重排 4/4：曝光回写（仅登录用户，服务端保底；前端 recordExposure 上报幂等补强）
-        if(!guest){
-            recCacheManager.addExposures(loginId,reordered.stream().map(Post::getId).toList());
-        }
+        // 会话曝光不再服务端回写（feed:exposure:{uid} 仅保留负反馈全局屏蔽）：
+        // 会话级去重由前端本会话内存记录（exposedIds 上传），F5 刷新即重置 → 看过的帖重新出现。
         // 自建装配（同构 PostServiceImpl，不动其 private 方法）
         return assemble(reordered, loginId);
     }
 
     /**
-     * 看过的哪些帖子
-     * @param req 帖子内部 id 列表（字符串）
+     * 兜底曝光回写（<b>已废弃</b>，空操作保留接口兼容）。
+     *
+     * <p>会话级曝光去重已改由<b>前端本会话内存记录</b>（RecFeedDTO.exposedIds 上传，
+     * F5 刷新即重置 → 看过的帖重新出现）；服务端 feed:exposure:{uid} 仅保留<b>负反馈全局屏蔽</b>。
+     * 若此处仍写曝光，会把「看过」误记为全局屏蔽，导致刷新后帖子消失——故不再写 Redis。</p>
      */
     @Override
     public void recordExposure(RecExposureDTO req) {
-        if (!StpUtil.isLogin() || req == null || CollUtil.isEmpty(req.getPostIds())) {
-            return;
-        }
-        List<Long> ids = req.getPostIds().stream()
-                .distinct()
-                .toList();
-        if(ids.isEmpty()){
-            return;
-        }
-        recCacheManager.addExposures(StpUtil.getLoginIdAsLong(),ids);
-
+        // 空操作：会话曝光由前端记录，服务端不再维护
     }
 
     /**
