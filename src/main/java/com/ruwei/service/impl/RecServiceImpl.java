@@ -63,6 +63,15 @@ public class RecServiceImpl implements RecService {
     private int recallTagLimit;
     @Value("${rec.recall.cold-limit:100}")
     private int recallColdLimit;
+    /** 冷启动召回窗口（小时）：审核通过延迟的新帖也能被召回（默认 72h，原硬编码 24h） */
+    @Value("${rec.cold.window-hours:72}")
+    private int coldWindowHours;
+    /** 冷启动 viewCount 阈值：低于该值视为新帖候选（可配 rec.cold.view-threshold） */
+    @Value("${rec.cold.view-threshold:50}")
+    private int coldViewThreshold;
+    /** 冷启动帖精排保底分：新帖无互动（pScore≈0）垫底进不了首屏，保底让其排到 score≈coldFloor 位置 */
+    @Value("${rec.fine.cold-floor:1.0}")
+    private double coldFloor;
     /** 兴趣维度常量（与 user_interest.dimension 对齐） */
     private static final int DIM_TAG = 2;
     private static final int DIM_TYPE = 3;
@@ -158,7 +167,12 @@ public class RecServiceImpl implements RecService {
         //主要是处理一下兴趣表的事情
         Map<String,Double> profile = guest ? Map.of() : loadProfile(loginId);
         //处理帖子,根据用户长期兴趣画像转化为：帖子id，分数（类似map集合）
+        //冷启动帖 pScore 保底：新帖无互动（score≈0 → pScore≈0）会垫底排在候选末尾进不了首屏，
+        //保底分让新帖至少排到 score≈coldFloor 位置，审核通过的新帖才能被看到
         List<Scored> scored = posts.stream().map(p -> new Scored(p, calcPScore(p, profile)))
+                .map(s -> coldIds.contains(s.post().getId())
+                        ? new Scored(s.post(), Math.max(s.pScore(), coldFloor))
+                        : s)
                 .sorted(Comparator.comparingDouble(Scored::pScore).reversed())
                 .toList();
 
@@ -402,7 +416,10 @@ public class RecServiceImpl implements RecService {
     }
 
     /**
-     * 路⑤ 冷启动：近 24h 新帖 + viewCount 低于阈值，最新在前。
+     * 路⑤ 冷启动：近 {@code coldWindowHours}（默认 72h）新帖 + viewCount 低于阈值，最新在前。
+     *
+     * <p><b>窗口从创建时间起算、放宽到 72h</b>：先审后发下审核通过可能晚于创建 24h，
+     * 24h 窗口会导致审核通过时帖子已从冷启动池消失（无互动 score=0，其他路也不命中）→ 推荐流永远看不到。</p>
      *
      * @return 冷启动池的 postId（供重排注入位 5/8 使用），同时并入候选
      */
@@ -412,8 +429,8 @@ public class RecServiceImpl implements RecService {
                 .eq(Post::getStatus, PostStatusEnum.PUBLISHED.getCode())
                 .eq(Post::getAuditStatus, PostAuditStatusEnum.APPROVED.getCode())
                 .eq(Post::getVisibility, PostVisibilityEnum.PUBLIC.getCode())
-                .gt(Post::getCreatedAt, DateUtil.offsetHour(new Date(), -24))
-                .lt(Post::getViewCount, 50)          // rec.cold.view-threshold:50
+                .gt(Post::getCreatedAt, DateUtil.offsetHour(new Date(), -coldWindowHours))
+                .lt(Post::getViewCount, coldViewThreshold)
                 .orderByDesc(Post::getCreatedAt)
                 .last("limit " + recallColdLimit)
                 .list()

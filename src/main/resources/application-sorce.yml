@@ -7,6 +7,7 @@ rec:
     topic: 0.3        # α 标签亲和系数（rec.fine.topic）
     type: 0.2         # β 内容形态亲和系数（rec.fine.type）
     board: 0.1        # γ 板块亲和系数（rec.fine.board）
+    cold-floor: 1.0   # 冷启动帖精排保底分（rec.fine.cold-floor）：新帖无互动时保证能进首屏
   # ---- 粗排 ----
   rough:
     top: 300          # 热度截断：候选按 score 降序保留 Top N（rec.rough.top）
@@ -19,4 +20,5 @@ rec:
     cold-limit: 100   # 路⑤ 冷启动上限（rec.recall.cold-limit）
   # ---- 冷启动 ----
   cold:
+    window-hours: 72  # 冷启动召回窗口（小时，rec.cold.window-hours）：先审后发审核可能延迟，24h→72h 防新帖召回错过
     view-threshold: 50  # viewCount 低于该值视为新帖候选（rec.cold.view-threshold）
