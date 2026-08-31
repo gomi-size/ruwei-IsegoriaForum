@@ -4,16 +4,14 @@ package com.ruwei.service;
 import com.ruwei.domain.dto.RecExposureDTO;
 import com.ruwei.domain.dto.RecFeedbackDTO;
 import com.ruwei.domain.dto.RecFeedDTO;
-import com.ruwei.domain.vo.PostBrowseVO;
+import com.ruwei.domain.vo.RecFeedVO;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
 
 /**
  * 推荐流服务（Phase 1 规则驱动四层漏斗：召回 → 粗排 → 精排 → 重排）。
  *
  * <p>接口形态为<b>游标分页</b>：cursor = 上页最后一条的 postId（字符串，全局 ToStringSerializer
- * 防雪花精度丢失），首屏不传；返回 List&lt;PostBrowseVO&gt;，前端取本页最后一条的 id 作下次 cursor，
+ * 防雪花精度丢失），首屏不传；返回 {@link RecFeedVO}（本页列表 + nextCursor + hasMore），
  * 返回条数 &lt; pageSize 即无更多。</p>
  */
 public interface RecService {
@@ -25,12 +23,12 @@ public interface RecService {
      * 游客：强制降级 discover 口径（不读关注/板块/标签画像，不写曝光）。</p>
      *
      * @param req 游标分页请求（cursor / pageSize / tab）
-     * @return 当前页帖子卡片列表（已按重排规则排序，返回前已回写曝光）
+     * @return 当前页结果（帖子卡片 + nextCursor + hasMore，已按重排规则排序，返回前已回写曝光）
      */
-    List<PostBrowseVO> feed(RecFeedDTO req);
+    RecFeedVO feed(RecFeedDTO req);
 
     /**
-     * 兜底曝光回写（feed 返回时已自动写，前端滚动/断网重试时可再调，防丢）。
+     * 兜底曝光回写：feed 返回时已自动写曝光 ZSet；前端滚动/断网重试时可再调，防丢（幂等）。
      *
      * @param req 帖子内部 id 列表（字符串）
      */

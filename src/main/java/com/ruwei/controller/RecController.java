@@ -8,12 +8,10 @@ import com.ruwei.common.ResultUtils;
 import com.ruwei.domain.dto.RecExposureDTO;
 import com.ruwei.domain.dto.RecFeedbackDTO;
 import com.ruwei.domain.dto.RecFeedDTO;
-import com.ruwei.domain.vo.PostBrowseVO;
+import com.ruwei.domain.vo.RecFeedVO;
 import com.ruwei.service.RecService;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * 推荐流接口（Phase 1 规则驱动四层漏斗）。
@@ -34,15 +32,17 @@ public class RecController {
      * 推荐流（游标分页）。
      *
      * <p>请求体：{cursor（上页最后一条 postId，首屏不传）, pageSize（默认 10，上限 20）,
-     * tab（recommend 综合 / discover 热点+冷启动）}。返回 List&lt;PostBrowseVO&gt;，
-     * 前端取本页最后一条的 id 作下次 cursor；返回条数 &lt; pageSize 即无更多。</p>
+     * tab（recommend 综合 / discover 热点+冷启动）}。返回 RecFeedVO（postBrowseVOList +
+     * nextCursor + hasMore）：hasMore=true 时前端取 nextCursor 作下次请求 cursor；
+     * hasMore=false 即无更多。曝光去重由服务端 Redis 曝光档案负责（feed 返回时自动回写），
+     * recordExposure 仅弱网兜底。</p>
      *
      * <p>游客可访问（降级 discover：仅热点+冷启动，不写曝光档案）；7 天内曝光去重仅推荐流生效。</p>
      */
     @PostMapping("/feed")
     @SaIgnore
     @RateLimit(limit = 30, window = 60, prefix = "rec")
-    public BaseResponse<List<PostBrowseVO>> feed(@RequestBody(required = false) RecFeedDTO req) {
+    public BaseResponse<RecFeedVO> feed(@RequestBody(required = false) RecFeedDTO req) {
         return ResultUtils.success(recService.feed(req));
     }
 

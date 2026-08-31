@@ -1,5 +1,6 @@
 package com.ruwei.domain.dto;
 
+import com.ruwei.domain.vo.PostBrowseVO;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -32,11 +33,11 @@ public class RecFeedDTO implements Serializable {
     private String tab = "recommend";
 
     /**
-     * 本会话已曝光/已看的帖子内部 id 列表（前端内存记录，F5 刷新即清空 → 帖子重新出现）。
-     *
-     * <p><b>会话级去重</b>：服务端取页时剔除这些 id 并顺延补齐（保证 pageSize 与游标连续性）；
-     * 负反馈「不感兴趣」由服务端全局屏蔽（feed:exposure:{uid}）负责，不在此列表，
-     * 前端切勿把负反馈帖传回本字段（全局屏蔽优先，补位也不会放出）。游客忽略本字段。</p>
+     * 前端本会话已收到的帖子卡片列表（PostBrowseVO 轻量卡片 VO）。<b>当前策略预留字段</b>：
+     * 服务端曝光去重由 Redis 曝光档案（feed:exposure:{uid}，7 天 TTL）负责，空页时直接返回
+     * 空结果（hasMore=false）不做回显，已看内容由前端本地已加载列表自行保留展示；本字段仅
+     * 随请求上传留存，后续若需「无新帖不空屏」服务端按卡片回显可启用。前端建议只传最近
+     * 100 条，防请求体膨胀。
      */
-    private List<String> exposedIds;
+    private List<PostBrowseVO> postBrowseVOList;
 }

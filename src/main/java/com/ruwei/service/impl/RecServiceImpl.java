@@ -19,6 +19,7 @@ import com.ruwei.domain.dto.RecFeedDTO;
 import com.ruwei.domain.dto.RecFeedbackDTO;
 import com.ruwei.domain.empty.*;
 import com.ruwei.domain.vo.PostBrowseVO;
+import com.ruwei.domain.vo.RecFeedVO;
 import com.ruwei.manager.FollowCacheManager;
 import com.ruwei.manager.RecCacheManager;
 import com.ruwei.service.*;
@@ -33,7 +34,7 @@ import java.util.stream.Collectors;
  * 推荐流服务（Phase 1 规则驱动四层漏斗：召回 → 粗排 → 精排 → 重排）。
  *
  * <p>接口形态为<b>游标分页</b>：cursor = 上页最后一条的 postId（字符串，全局 ToStringSerializer
- * 防雪花精度丢失），首屏不传；返回 List&lt;PostBrowseVO&gt;，前端取本页最后一条的 id 作下次 cursor，
+ * 防雪花精度丢失），首屏不传；返回 {@link RecFeedVO}（本页列表 + nextCursor + hasMore），
  * 返回条数 &lt; pageSize 即无更多。</p>
  */
 @Service
@@ -119,10 +120,10 @@ public class RecServiceImpl implements RecService {
      * 游客：强制降级 discover 口径（不读关注/板块/标签画像，不写曝光）。</p>
      *
      * @param req 游标分页请求（cursor / pageSize / tab）
-     * @return 当前页帖子卡片列表（已按重排规则排序，返回前已回写曝光）
+     * @return 当前页结果（帖子卡片 + nextCursor + hasMore，已按重排规则排序，返回前已回写曝光）
      */
     @Override
-    public List<PostBrowseVO> feed(RecFeedDTO req) {
+    public RecFeedVO feed(RecFeedDTO req) {
         if (req == null) {
             req = new RecFeedDTO();
         }
@@ -145,7 +146,7 @@ public class RecServiceImpl implements RecService {
         }
         Set<Long> coldIds = recallByCold(candidateIds);
         if (candidateIds.isEmpty()) {
-            return List.of();
+            return emptyFeed();
         }
 
 
@@ -161,7 +162,7 @@ public class RecServiceImpl implements RecService {
             posts=posts.subList(0,roughTop);
         }
         if (posts.isEmpty()) {
-            return List.of();
+            return emptyFeed();
         }
         //精排：pScore = hotScore × (1 + α·tag亲和 + β·type亲和 + γ·board亲和)
         //主要是处理一下兴趣表的事情
@@ -179,12 +180,13 @@ public class RecServiceImpl implements RecService {
         // 重排 1/4：游标定位（在全量精排序列中定位，序列含已曝光帖 → cursor 精确匹配不失效）
         int start = locateCursor(scored, req.getCursor());
         if(start>=scored.size()){
-            return List.of();
+            return emptyFeed();
         }
         // 重排 2/4：取页 = 从 start 起跳过已曝光帖、顺延补齐 pageSize 条
-        // 游客无曝光档案直接取连续页；登录用户双重剔除：
-        //   ① blocked（全局负反馈屏蔽，Redis feed:exposure:{uid}，跨刷新持久，永不补位放出）
-        //   ② sessionExposed（前端本会话已看，内存上传，F5 刷新即重置）
+        // 游客无曝光档案直接取连续页；登录用户 Redis 曝光剔除（feed:exposure:{uid} ZSet，4 天 TTL）：
+        // 会话曝光（feed 返回时自动回写 + recordExposure 兜底）与负反馈屏蔽共用同一 ZSet，
+        // 已曝光帖（含负反馈帖）一律跳过顺延补齐，永不放出；无新帖可推（空页）直接返回空结果
+        // （hasMore=false），已看内容由前端本地已加载列表自行保留展示
         List<Post> pagePosts = new ArrayList<>();
         if (guest) {
             for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
@@ -195,60 +197,60 @@ public class RecServiceImpl implements RecService {
             for (int i = start; i < scored.size(); i++) {
                 tailIds.add(scored.get(i).post().getId());
             }
-            // ① 全局负反馈屏蔽（跨刷新持久；feed 不再自动回写曝光，此处仅含负反馈帖）
-            Set<Long> blocked = tailIds.isEmpty() ? Set.of()
+            // Redis 剔除：filterExposed 返回 tailIds 中「未被曝光过」的帖（pipeline 批量 zScore），
+            // 已曝光（会话已看 + 负反馈屏蔽）不在此集合内，取页时直接跳过
+            Set<Long> unexposed = tailIds.isEmpty() ? Set.of()
                     : recCacheManager.filterExposed(loginId, tailIds);
-            // ② 会话已看（前端本会话上传，刷新即重置）：内存剔除
-            Set<Long> sessionExposed = new HashSet<>();
-            if (CollUtil.isNotEmpty(req.getExposedIds())) {
-                for (String s : req.getExposedIds()) {
-                    if (NumberUtil.isLong(s)) {
-                        sessionExposed.add(Long.valueOf(s));
-                    }
-                }
-            }
-            // 第一轮：未曝光（不在 blocked 且不在 sessionExposed）优先
             for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
-                Long id = scored.get(i).post().getId();
-                if (!blocked.contains(id) && !sessionExposed.contains(id)) {
-                    pagePosts.add(scored.get(i).post());
-                }
-            }
-            // 第二轮：未曝光不足 pageSize 时，用「会话已看但未被负反馈屏蔽」的帖按 pScore 序补位——
-            // 内容池小 + 会话去重耗尽时兜底，保证首页/翻页永不空白（宁可重复不可空屏）；
-            // blocked（负反馈）永不补位放出
-            if (pagePosts.size() < pageSize) {
-                for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
-                    Long id = scored.get(i).post().getId();
-                    if (!blocked.contains(id) && sessionExposed.contains(id)) {
-                        pagePosts.add(scored.get(i).post());
-                    }
+                Post p = scored.get(i).post();
+                if (unexposed.contains(p.getId())) {
+                    pagePosts.add(p);
                 }
             }
         }
         if (pagePosts.isEmpty()) {
-            return List.of();
+            return emptyFeed();
+        }
+        // 会话曝光服务端回写：本页帖子写入 feed:exposure:{uid} ZSet（score=时间戳，ZADD 幂等，
+        //4天 TTL），下次取页 filterExposed 剔除（跨刷新持久）；前端 recordExposure 仅作弱网兜底
+        if (!guest) {
+            recCacheManager.addExposures(loginId, pagePosts.stream().map(Post::getId).toList());
         }
 
         //重排 3/4：页内重排（同作者打散 → 冷启动注入位 5/8）
         List<Post> reordered = rerank(pagePosts, coldIds);
 
-        // 会话曝光不再服务端回写（feed:exposure:{uid} 仅保留负反馈全局屏蔽）：
-        // 会话级去重由前端本会话内存记录（exposedIds 上传），F5 刷新即重置 → 看过的帖重新出现。
         // 自建装配（同构 PostServiceImpl，不动其 private 方法）
-        return assemble(reordered, loginId);
+        List<PostBrowseVO> voList = assemble(reordered, loginId);
+
+        // 游标翻页语义：前端取本页最后一条 id 作下次 cursor；本页不足 pageSize 即无更多
+        RecFeedVO vo = new RecFeedVO();
+        vo.setPostBrowseVOList(voList);
+        boolean hasMore = pagePosts.size() >= pageSize;
+        vo.setHasMore(hasMore);
+        vo.setNextCursor(hasMore ? reordered.get(reordered.size() - 1).getId() : null);
+        return vo;
     }
 
     /**
-     * 兜底曝光回写（<b>已废弃</b>，空操作保留接口兼容）。
-     *
-     * <p>会话级曝光去重已改由<b>前端本会话内存记录</b>（RecFeedDTO.exposedIds 上传，
-     * F5 刷新即重置 → 看过的帖重新出现）；服务端 feed:exposure:{uid} 仅保留<b>负反馈全局屏蔽</b>。
-     * 若此处仍写曝光，会把「看过」误记为全局屏蔽，导致刷新后帖子消失——故不再写 Redis。</p>
+     * 空页结果（候选耗尽/全部已曝光/取页为空等场景）：空列表 + hasMore=false + nextCursor=null。
+     * 不做回显兜底——已看内容由前端本地已加载列表自行保留展示（请求仍上传 seenIds 预留）。
+     */
+    private RecFeedVO emptyFeed() {
+        RecFeedVO vo = new RecFeedVO();
+        vo.setPostBrowseVOList(List.of());
+        vo.setHasMore(false);
+        vo.setNextCursor(null);
+        return vo;
+    }
+
+    /**
+     * 兜底曝光回写：feed 返回时已自动把本页帖子写入 feed:exposure:{uid}（ZADD 幂等），
+     * 前端滚动渲染/弱网重试丢页时可再调本接口补写，防漏剔（幂等：同 member 只刷新时间戳）。
      */
     @Override
     public void recordExposure(RecExposureDTO req) {
-        // 空操作：会话曝光由前端记录，服务端不再维护
+        recCacheManager.addExposures(StpUtil.getLoginIdAsLong(), req.getPostIds());
     }
 
     /**

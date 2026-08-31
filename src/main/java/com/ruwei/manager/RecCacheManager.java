@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
 public class RecCacheManager {
     private static final String EXPOSURE = "feed:exposure:";        // ZSet
     private static final String INTEREST = "uinterest:";            // String INCR
-    private static final Duration EXP_TTL = Duration.ofDays(7);
-    private static final Duration INT_TTL = Duration.ofDays(3);
+    private static final Duration EXP_TTL = Duration.ofDays(4);
+    private static final Duration INT_TTL = Duration.ofDays(2);
     private static final String SENTINEL = "-1";
 
 
