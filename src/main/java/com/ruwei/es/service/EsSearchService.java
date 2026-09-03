@@ -3,6 +3,7 @@ package com.ruwei.es.service;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ruwei.component.assembler.BoardBriefFiller;
 import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.es.doc.PostDoc;
 import com.ruwei.service.LikeService;
@@ -34,6 +35,8 @@ public class EsSearchService {
     private ElasticsearchOperations operations;
     @Resource
     private LikeService likeService;
+    @Resource
+    private BoardBriefFiller boardBriefFiller;
 
     /**
      * 帖子搜索。
@@ -114,6 +117,9 @@ public class EsSearchService {
         page.setRecords(list);
         page.setTotal(hits.getTotalHits());
 
+        // 批量填充板块名/板块标识（DB 实时补查一次，防 N+1；无板块帖自动跳过）
+        boardBriefFiller.fillBoardBrief(list);
+
         // 当前登录用户批量装配 isLiked（游客跳过；Redis pipeline 一次往返，缺失回源 DB，防 N+1）
         fillIsLiked(list);
 
@@ -178,6 +184,7 @@ public class EsSearchService {
         vo.setUserId(d.getUserId());
         vo.setUserNickname(d.getNickname());
         vo.setUserAvatar(d.getAvatar());
+        vo.setBoardId(d.getBoardId());
         vo.setTitle(d.getTitle());
         vo.setCover(d.getCover());
         // 默认预览正文：ES 纯文本字段截断（命中关键词时上方用高亮片段覆盖）

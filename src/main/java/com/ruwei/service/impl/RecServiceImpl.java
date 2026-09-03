@@ -10,6 +10,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
+import com.ruwei.component.assembler.BoardBriefFiller;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
@@ -101,6 +102,8 @@ public class RecServiceImpl implements RecService {
     @Resource
     private UserService userService;
     @Resource
+    private BoardBriefFiller boardBriefFiller;
+    @Resource
     private LikeService likeService;
     @Resource
     private CollectService collectService;
@@ -146,7 +149,8 @@ public class RecServiceImpl implements RecService {
         }
         Set<Long> coldIds = recallByCold(candidateIds);
         if (candidateIds.isEmpty()) {
-            return emptyFeed();
+            // 无任何候选 → 无新内容可推：登录用户回显最近推流过的内容兜底不空屏；游客无历史保持空页
+            return fallbackToExposed(loginId, pageSize);
         }
 
 
@@ -162,7 +166,8 @@ public class RecServiceImpl implements RecService {
             posts=posts.subList(0,roughTop);
         }
         if (posts.isEmpty()) {
-            return emptyFeed();
+            // 候选全被状态过滤（竞态下架/审核撤回）→ 回显最近推流过的内容兜底
+            return fallbackToExposed(loginId, pageSize);
         }
         //精排：pScore = hotScore × (1 + α·tag亲和 + β·type亲和 + γ·board亲和)
         //主要是处理一下兴趣表的事情
@@ -180,13 +185,14 @@ public class RecServiceImpl implements RecService {
         // 重排 1/4：游标定位（在全量精排序列中定位，序列含已曝光帖 → cursor 精确匹配不失效）
         int start = locateCursor(scored, req.getCursor());
         if(start>=scored.size()){
-            return emptyFeed();
+            // 游标越界（末页后继续翻页）→ 回显最近推流过的内容兜底
+            return fallbackToExposed(loginId, pageSize);
         }
         // 重排 2/4：取页 = 从 start 起跳过已曝光帖、顺延补齐 pageSize 条
         // 游客无曝光档案直接取连续页；登录用户 Redis 曝光剔除（feed:exposure:{uid} ZSet，4 天 TTL）：
         // 会话曝光（feed 返回时自动回写 + recordExposure 兜底）与负反馈屏蔽共用同一 ZSet，
-        // 已曝光帖（含负反馈帖）一律跳过顺延补齐，永不放出；无新帖可推（空页）直接返回空结果
-        // （hasMore=false），已看内容由前端本地已加载列表自行保留展示
+        // 已曝光帖（含负反馈帖）一律跳过顺延补齐，永不作为「新内容」放出；取页为空（已看尽）时
+        // 由 fallbackToExposed 回显最近推流过的内容兜底不空屏（登录用户；游客无历史仍空页）
         List<Post> pagePosts = new ArrayList<>();
         if (guest) {
             for (int i = start; i < scored.size() && pagePosts.size() < pageSize; i++) {
@@ -209,7 +215,8 @@ public class RecServiceImpl implements RecService {
             }
         }
         if (pagePosts.isEmpty()) {
-            return emptyFeed();
+            // 曝光剔除后本页无可放内容（已看尽）→ 回显最近推流过的内容兜底不空屏（登录用户）
+            return fallbackToExposed(loginId, pageSize);
         }
         // 会话曝光服务端回写：本页帖子写入 feed:exposure:{uid} ZSet（score=时间戳，ZADD 幂等，
         //4天 TTL），下次取页 filterExposed 剔除（跨刷新持久）；前端 recordExposure 仅作弱网兜底
@@ -233,12 +240,66 @@ public class RecServiceImpl implements RecService {
     }
 
     /**
-     * 空页结果（候选耗尽/全部已曝光/取页为空等场景）：空列表 + hasMore=false + nextCursor=null。
-     * 不做回显兜底——已看内容由前端本地已加载列表自行保留展示（请求仍上传 seenIds 预留）。
+     * 空页结果：空列表 + hasMore=false + nextCursor=null。
+     * 仅剩<b>游客</b>（不写曝光档案，无历史可回显）与「回显内容亦为空」的场景使用；
+     * 登录用户推荐流空页由 {@link #fallbackToExposed} 回显最近推流过的内容兜底，不空屏。
      */
     private RecFeedVO emptyFeed() {
         RecFeedVO vo = new RecFeedVO();
         vo.setPostBrowseVOList(List.of());
+        vo.setHasMore(false);
+        vo.setNextCursor(null);
+        return vo;
+    }
+
+    /**
+     * 空页回显兜底（登录用户「不空屏」）：无新内容可推（候选耗尽/已看尽/游标越界/取页为空）时，
+     * 从 Redis 曝光档案取<b>最近推流过的帖子</b>原样返回（最近曝光在前，最多 pageSize 条），
+     * 让前端继续展示已推流内容，替代上一阶段「空页由前端本地列表保留」的方案。
+     *
+     * <p>边界：
+     * <ul>
+     *   <li>游客不写曝光档案 → 直接空页（{@link #emptyFeed()}），行为与原先一致；</li>
+     *   <li>回显的帖子本就在曝光档案中，<b>不再重复回写曝光</b>（ZADD 虽幂等，但会刷新
+     *       score=时间戳，导致同一批帖永远排在回显头部、反复霸屏）；</li>
+     *   <li>回显仍过 {@link #isRecommendable} 状态过滤（已下架/审核撤回的不回显），
+     *       再按曝光时间序（最近在前）重排装配，保证顺序稳定；</li>
+     *   <li><b>已知限制</b>：曝光档案与负反馈屏蔽共用同一 ZSet，历史点过「不感兴趣」的帖子
+     *       也会被回显。如需排除，需另建独立屏蔽档案（如 feed:block:{uid}）并在本方法剔除，
+     *       当前阶段暂不区分。</li>
+     * </ul>
+     *
+     * @param loginId  当前登录用户内部 id（游客为 null）
+     * @param pageSize 回显条数上限
+     * @return 回显结果（hasMore=false、nextCursor=null，前端翻页终止）；无历史/游客时为空页
+     */
+    private RecFeedVO fallbackToExposed(Long loginId, int pageSize) {
+        if (loginId == null) {
+            return emptyFeed();
+        }
+        List<Long> exposed = recCacheManager.get(loginId, pageSize);
+        if (CollUtil.isEmpty(exposed)) {
+            return emptyFeed();
+        }
+        List<Post> posts = postService.listByIds(exposed).stream()
+                .filter(this::isRecommendable)
+                .toList();
+        if (posts.isEmpty()) {
+            return emptyFeed();
+        }
+        // listByIds 无序，按曝光时间序（最近曝光在前）重排，保证回显顺序稳定且与 get 一致
+        Map<Long, Post> byId = posts.stream()
+                .collect(Collectors.toMap(Post::getId, p -> p, (a, b) -> a));
+        List<Post> ordered = exposed.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+        if (ordered.isEmpty()) {
+            return emptyFeed();
+        }
+        RecFeedVO vo = new RecFeedVO();
+        // 回显不写曝光（见边界说明）；hasMore=false 终止前端继续翻页，避免无限回显
+        vo.setPostBrowseVOList(assemble(ordered, loginId));
         vo.setHasMore(false);
         vo.setNextCursor(null);
         return vo;
@@ -592,6 +653,8 @@ public class RecServiceImpl implements RecService {
         List<PostBrowseVO> voList = posts.stream()
                 .map(p -> buildBrowseVO(p, userMap))
                 .toList();
+        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        boardBriefFiller.fillBoardBrief(voList);
         if (loginId != null) {
             fillLikedAndCollected(voList, loginId);
         }

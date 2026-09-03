@@ -1,6 +1,7 @@
 package com.ruwei.manager;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.NumberUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.*;
@@ -181,6 +182,52 @@ public class RecCacheManager {
         });
     }
 
+    /**
+     * 从已曝光的帖子中获取帖子（推荐流「空页回显」兜底数据源：无新内容可推时，
+     * 把最近推流过的帖子原样返回给前端，实现不空屏）。
+     *
+     * <p><b>存储形态提醒：曝光档案是 ZSet</b>（member=帖子内部 id，score=曝光毫秒时间戳），
+     * 读取必须走 {@code opsForZSet()}；不能像短期兴趣（uinterest:*，String INCR）那样用
+     * {@code opsForValue()}——对 ZSet 键做 String GET 只会拿到 null，是本类易误用点。</p>
+     *
+     * <p>键缺失 = 从未曝光 = 无可回显 → 返回空列表（不建哨兵，与 {@link #filterExposed} 的
+     * 「无记录=没看过」语义一致）。</p>
+     *
+     * @param userId 用户内部 id（仅登录用户写曝光档案；游客恒空）
+     * @param count  最多返回条数（最近曝光优先）；&lt;=0 表示返回全部
+     * @return 已曝光的帖子内部 id，按曝光时间倒序（最近推流过的在前）；无记录返回空列表
+     */
+    public List<Long> get(Long userId, long count) {
+        String key = EXPOSURE + userId;
+        if (Boolean.FALSE.equals(redis.hasKey(key))) {
+            return List.of();
+        }
+        // ZREVRANGE：score=曝光时间戳，倒序 = 最近推流过的排最前，正好做「刚看过的内容优先回显」
+        Set<String> members = count > 0
+                ? redis.opsForZSet().reverseRange(key, 0, count - 1)
+                : redis.opsForZSet().reverseRange(key, 0, -1);
+        if (CollUtil.isEmpty(members)) {
+            return List.of();
+        }
+        // 保序过滤脏数据（member 应为雪花数字串；LinkedHashSet 保 ZREVRANGE 顺序）
+        List<Long> result = new ArrayList<>(members.size());
+        for (String m : members) {
+            if (NumberUtil.isLong(m)) {
+                result.add(Long.valueOf(m));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 从已经曝光的帖子中获取帖子（取该用户全部已曝光帖，最近曝光在前）。
+     *
+     * @param userId 用户内部 id
+     * @return 全部已曝光的帖子内部 id（最近曝光在前）；无记录返回空列表
+     */
+    public List<Long> get(Long userId) {
+        return get(userId, -1);
+    }
 
 
 

@@ -17,6 +17,7 @@ import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;
+import com.ruwei.component.assembler.BoardBriefFiller;
 import com.ruwei.component.notification.event.AdminEvent;
 import com.ruwei.component.notification.event.PostEvent;
 import com.ruwei.component.notification.event.ShareEvent;
@@ -109,6 +110,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
 
     @Resource
     private BoardService boardService;
+
+    /**
+     * 板块信息批量装配（PostBrowseVO 的 boardName/boardSlug 统一填充，防 N+1）
+     */
+    @Resource
+    private BoardBriefFiller boardBriefFiller;
 
     @Resource
     private UserService userService;
@@ -818,6 +825,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
+        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        boardBriefFiller.fillBoardBrief(voList);
         // 当前登录用户批量装配 isLiked / isCollected（未登录跳过）
         fillIsLiked(voList);
         fillIsCollected(voList);
@@ -899,6 +908,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
+        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        boardBriefFiller.fillBoardBrief(voList);
         // 当前登录用户批量装配 isLiked / isCollected
         fillIsLiked(voList);
         fillIsCollected(voList);
@@ -1625,6 +1636,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();
+        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        boardBriefFiller.fillBoardBrief(voList);
         fillIsLiked(voList);
         fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(vhPage.getCurrent(), vhPage.getSize(), vhPage.getTotal());
@@ -1668,6 +1681,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();
+        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        boardBriefFiller.fillBoardBrief(voList);
         fillIsLiked(voList);
         fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(collectPage.getCurrent(), collectPage.getSize(), collectPage.getTotal());

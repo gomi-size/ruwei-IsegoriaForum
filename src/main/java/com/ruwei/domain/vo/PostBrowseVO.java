@@ -11,12 +11,13 @@ import java.util.Date;
  * 帖子<b>列表</b>展示 VO（简洁卡片，供帖子列表页 / 首页信息流使用）。
  *
  * <p><b>与 {@link PostVO}（详情）的分工</b>：列表只给前端渲染卡片所需的轻量字段
- * （标题、封面、正文摘要、作者昵称/头像、计数、时间等），<b>不含完整正文 content /
+ * （标题、封面、正文摘要、作者昵称/头像、板块、计数、时间等），<b>不含完整正文 content /
  * 图片全列表 imageUrl / 话题 topic / 可见性/状态等详情信息</b>；用户点击进入帖子后，
  * 由详情接口 {@code GET /post/{id}} 返回完整的 {@link PostVO}。</p>
  *
  * <p>作者信息（{@code userNickname} / {@code userAvatar}）由 Service 层批量查 user 表装配，
- * 不冗余存储于 post 表。</p>
+ * 板块信息（{@code boardName} / {@code boardSlug}）由 {@code BoardBriefFiller} 批量查 board
+ * 表装配，均不冗余存储于 post 表。</p>
  */
 @Data
 public class PostBrowseVO implements Serializable {
@@ -45,6 +46,23 @@ public class PostBrowseVO implements Serializable {
      * 作者头像 URL（来自 user 表 avatar）
      */
     private String userAvatar;
+
+    /**
+     * 所属板块内部主键（post.boardId，可空=无板块帖；JSON 输出为字符串，防前端丢精度）
+     */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long boardId;
+
+    /**
+     * 所属板块名（来自 board 表 name，由 BoardBriefFiller 批量装配；
+     * 无板块或板块已逻辑删除时为 null，前端不渲染板块入口）
+     */
+    private String boardName;
+
+    /**
+     * 所属板块唯一标识（来自 board 表 slug，前端拼 {@code /board/{slug}} 跳转板块页）
+     */
+    private String boardSlug;
 
     /**
      * 标题
