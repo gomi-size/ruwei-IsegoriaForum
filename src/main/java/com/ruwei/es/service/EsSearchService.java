@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruwei.component.assembler.BoardBriefFiller;
+import com.ruwei.component.assembler.TagBriefFiller;
 import com.ruwei.domain.vo.PostBrowseVO;
 import com.ruwei.es.doc.PostDoc;
 import com.ruwei.service.LikeService;
@@ -37,6 +38,10 @@ public class EsSearchService {
     private LikeService likeService;
     @Resource
     private BoardBriefFiller boardBriefFiller;
+
+    /** 话题标签批量装配（PostBrowseVO.tags，post_tag + tag 两表各查一次，防 N+1） */
+    @Resource
+    private TagBriefFiller tagBriefFiller;
 
     /**
      * 帖子搜索。
@@ -117,8 +122,10 @@ public class EsSearchService {
         page.setRecords(list);
         page.setTotal(hits.getTotalHits());
 
-        // 批量填充板块名/板块标识（DB 实时补查一次，防 N+1；无板块帖自动跳过）
+        // 批量填充板块对象（DB 实时补查一次，防 N+1；无板块帖自动跳过）
         boardBriefFiller.fillBoardBrief(list);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(list);
 
         // 当前登录用户批量装配 isLiked（游客跳过；Redis pipeline 一次往返，缺失回源 DB，防 N+1）
         fillIsLiked(list);

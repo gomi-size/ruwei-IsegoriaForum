@@ -11,6 +11,7 @@ import cn.hutool.json.JSONUtil;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.assembler.BoardBriefFiller;
+import com.ruwei.component.assembler.TagBriefFiller;
 import com.ruwei.domain.Enum.PostAuditStatusEnum;
 import com.ruwei.domain.Enum.PostStatusEnum;
 import com.ruwei.domain.Enum.PostVisibilityEnum;
@@ -103,6 +104,10 @@ public class RecServiceImpl implements RecService {
     private UserService userService;
     @Resource
     private BoardBriefFiller boardBriefFiller;
+
+    /** 话题标签批量装配（PostBrowseVO.tags，post_tag + tag 两表各查一次，防 N+1） */
+    @Resource
+    private TagBriefFiller tagBriefFiller;
     @Resource
     private LikeService likeService;
     @Resource
@@ -653,8 +658,10 @@ public class RecServiceImpl implements RecService {
         List<PostBrowseVO> voList = posts.stream()
                 .map(p -> buildBrowseVO(p, userMap))
                 .toList();
-        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        // 批量填充板块对象（无板块帖自动跳过，防 N+1）
         boardBriefFiller.fillBoardBrief(voList);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(voList);
         if (loginId != null) {
             fillLikedAndCollected(voList, loginId);
         }

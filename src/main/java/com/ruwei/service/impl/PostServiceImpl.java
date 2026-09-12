@@ -18,6 +18,7 @@ import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
 import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.component.assembler.BoardBriefFiller;
+import com.ruwei.component.assembler.TagBriefFiller;
 import com.ruwei.component.notification.event.AdminEvent;
 import com.ruwei.component.notification.event.PostEvent;
 import com.ruwei.component.notification.event.ShareEvent;
@@ -112,10 +113,16 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     private BoardService boardService;
 
     /**
-     * 板块信息批量装配（PostBrowseVO 的 boardName/boardSlug 统一填充，防 N+1）
+     * 板块信息批量装配（PostBrowseVO 的 board 对象 + 兼容字段 boardName/boardSlug，防 N+1）
      */
     @Resource
     private BoardBriefFiller boardBriefFiller;
+
+    /**
+     * 话题标签批量装配（PostBrowseVO 的 tags 列表，post_tag + tag 两表批量查，防 N+1）
+     */
+    @Resource
+    private TagBriefFiller tagBriefFiller;
 
     @Resource
     private UserService userService;
@@ -825,8 +832,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
-        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        // 批量填充板块对象（无板块帖自动跳过，防 N+1）
         boardBriefFiller.fillBoardBrief(voList);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(voList);
         // 当前登录用户批量装配 isLiked / isCollected（未登录跳过）
         fillIsLiked(voList);
         fillIsCollected(voList);
@@ -908,8 +917,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = page.getRecords().stream()
                 .map(post -> buildPostBrowseVO(post, userMap))
                 .toList();
-        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        // 批量填充板块对象（无板块帖自动跳过，防 N+1）
         boardBriefFiller.fillBoardBrief(voList);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(voList);
         // 当前登录用户批量装配 isLiked / isCollected
         fillIsLiked(voList);
         fillIsCollected(voList);
@@ -1066,6 +1077,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         vo.setImageUrl(imageUrls);
         vo.setContentBlocks(buildContentBlocks(post, imageUrls));
         vo.setUserNickname(user.getNickname());
+
+        // 板块简要信息：boardId 非空时单查一次 board（详情/草稿均为单帖场景，无 N+1；
+        // 板块已逻辑删除时 getById 返回 null，BoardBrief.of(null) 返回 null，前端不渲染板块入口）
+        if (post.getBoardId() != null) {
+            vo.setBoard(PostBrowseVO.BoardBrief.of(boardService.getById(post.getBoardId())));
+        }
         return vo;
     }
 
@@ -1636,8 +1653,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();
-        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        // 批量填充板块对象（无板块帖自动跳过，防 N+1）
         boardBriefFiller.fillBoardBrief(voList);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(voList);
         fillIsLiked(voList);
         fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(vhPage.getCurrent(), vhPage.getSize(), vhPage.getTotal());
@@ -1681,8 +1700,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         List<PostBrowseVO> voList = ordered.stream()
                 .map(p -> buildPostBrowseVO(p, userMap))
                 .toList();
-        // 批量填充板块名/板块标识（无板块帖自动跳过，防 N+1）
+        // 批量填充板块对象（无板块帖自动跳过，防 N+1）
         boardBriefFiller.fillBoardBrief(voList);
+        // 批量填充话题标签（post_tag + tag 两表各查一次，防 N+1）
+        tagBriefFiller.fillTags(voList);
         fillIsLiked(voList);
         fillIsCollected(voList);
         IPage<PostBrowseVO> result = new Page<>(collectPage.getCurrent(), collectPage.getSize(), collectPage.getTotal());
