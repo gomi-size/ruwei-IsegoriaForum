@@ -7,8 +7,10 @@ import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 全局异常处理器：统一将异常转换为 {@link BaseResponse}，保证前后端错误契约一致。
@@ -17,6 +19,25 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * 路径变量无法转换成目标类型，例如把 /post/followFist 当作 /post/{id} 访问。
+     * 这是客户端请求错误，不应记录为系统异常。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public BaseResponse<?> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("请求参数类型错误：name={}, value={}", e.getName(), e.getValue());
+        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "请求参数格式错误：" + e.getName());
+    }
+
+    /**
+     * 请求方法与接口定义不一致。
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public BaseResponse<?> handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        log.warn("请求方法不支持：method={}, message={}", e.getMethod(), e.getMessage());
+        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "请求方法不支持");
+    }
 
     /**
      * 业务异常：ThrowUtils / BusinessException 主动抛出的可预期错误

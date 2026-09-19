@@ -161,7 +161,7 @@
                 <version>${spring-boot.version}</version>
                 <configuration>
                     <mainClass>com.ruwei.IsegoriaForumApplication</mainClass>
-                    <skip>true</skip>
+                    <skip>false</skip>
                     <!-- JDK 17 强封装(JPMS)下，序列化库(Sa-Token/Hutool/springdoc)反射访问
                          java.util 等包内部字段会被拒绝，需显式 add-opens 参数。
                          注意：该配置仅对 mvn spring-boot:run 生效；IDE 直接启动时

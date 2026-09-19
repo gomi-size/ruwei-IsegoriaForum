@@ -26,16 +26,16 @@ public class PostDoc {
     @Field(type = FieldType.Long)
     private Long boardId;
 
-    @Field(type = FieldType.Text, analyzer = "ik_index", searchAnalyzer = "ik_search")
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String title;
 
-    @Field(type = FieldType.Text, analyzer = "ik_index", searchAnalyzer = "ik_search")
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String plainText;
 
-    @Field(type = FieldType.Text, analyzer = "ik_index", searchAnalyzer = "ik_search")
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private List<String> tagNames;
 
-    @Field(type = FieldType.Text, analyzer = "ik_index", searchAnalyzer = "ik_search")
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String nickname;
 
     @Field(type = FieldType.Keyword, index = false)
