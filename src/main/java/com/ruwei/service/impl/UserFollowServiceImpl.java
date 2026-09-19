@@ -194,8 +194,7 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
             if (isMutualFollow(loginId, targetId)) {
                 CountUtils.increment(userService, User::getId, loginId, "fansCount", -1);
             }
-            //推送消息
-            eventPublisher.publishEvent(new FollowEvent(this,id,targetId,FollowEvent.ACTION_CANCEL));
+            eventPublisher.publishEvent(new FollowEvent(this, loginId, targetId, FollowEvent.ACTION_CANCEL));
 
         } else if (one.getStatus() == 2) {
             ThrowUtils.throwIf(true, ErrorCode.OPERATION_ERROR, "已经处于取消关注状态");
