@@ -14,6 +14,7 @@ import com.ruwei.manager.UploadResult;
 import com.ruwei.mapper.PostImageMapper;
 import com.ruwei.service.PostImageService;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,6 +28,7 @@ import java.util.Set;
 /**
  * 帖子图片业务：校验、COS key 生成、上传结果组装。
  */
+@Slf4j
 @Service
 public class PostImageServiceImpl extends ServiceImpl<PostImageMapper, PostImage>
         implements PostImageService {
@@ -74,6 +76,7 @@ public class PostImageServiceImpl extends ServiceImpl<PostImageMapper, PostImage
         try {
             result = objectStorageManager.uploadImage(key, bytes, TYPE_MIME.get(fileType));
         } catch (Exception e) {
+            log.error("图片上传 COS 失败，key={}", key, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图片上传失败");
         }
 
