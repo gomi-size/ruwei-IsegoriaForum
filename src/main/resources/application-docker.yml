@@ -33,6 +33,24 @@ spring:
     connection-timeout: 3s
     socket-timeout: 60s
 
+  # 邮箱验证码发信（SMTP）。凭据一律走环境变量，禁止明文提交 git。
+  # 465 与 587 二选一：465 用 ssl.enable；587 换成 starttls.enable + starttls.required。
+  mail:
+    host: smtp.qq.com
+    port: 465
+    username: 3136124236@qq.com
+    password: gndoxsidfhitddbe
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
 # Profile-specific lists replace the local list from application.yml.
 cors:
   allowed-origins:
@@ -53,6 +71,16 @@ cos:
     secret-key: ${COS_CLIENT_SECRET_KEY}
     region: ${COS_CLIENT_REGION}
     bucket: ${COS_CLIENT_BUCKET}
+
+# 邮箱验证码业务参数（绑定 com.ruwei.config.MailProperties）
+isegoria:
+  mail:
+    from-name: Isegoria 论坛
+    code-ttl-seconds: 300
+    cooldown-seconds: 60
+    daily-limit-per-email: 10
+    daily-limit-per-ip: 50
+    fail-limit: 5
 
 logging:
   level:
