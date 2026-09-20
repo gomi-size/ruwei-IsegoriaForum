@@ -75,11 +75,15 @@ public interface UserService extends IService<User> {
     void editUserInfo(UserEditDTO userEditDTO);
 
     /**
-     * 用户修改密码
-     * @param id
-     * @param password
+     * 用户修改自己的密码（已登录场景）。
+     *
+     * <p>身份凭证为登录态本身，因此<b>必须校验 DTO 中的 id 与当前登录用户一致</b>，
+     * 防止越权修改他人密码。修改成功后销毁该账号全部历史会话，
+     * 与 {@link #forgetPassword} 的收尾行为保持一致。</p>
+     *
+     * @param editPasswordDTO 目标用户内部 id、新密码与确认密码
      */
-    void editUserPassword(Long id, String password);
+    void editUserPassword(EditPasswordDTO editPasswordDTO);
 
     /**
      * 忘记密码：凭邮箱验证码重置密码（未登录场景）。

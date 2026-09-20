@@ -193,17 +193,25 @@ public class UserController {
 
 
     /**
-     * 修改密码
-     * @param id
-     * @param password
-     * @return
+     * 修改密码（已登录场景，只能改本人的）。
+     *
+     * <p><b>契约变更（前端需同步调整）</b>：入参由 query 参数 {@code ?id=&password=}
+     * 改为 JSON 请求体 {@link EditPasswordDTO}，并新增 {@code checkPassword} 二次确认。
+     * {@code id} 一律传<b>内部主键 id</b>（即登录接口返回的用户对象里的 {@code id} 字段），
+     * 不要传对外编码 {@code userId}；且必须与当前登录用户一致，否则返回 40300。</p>
+     *
+     * <p><b>行为变更</b>：修改成功后服务端会销毁该账号全部会话
+     * （与「忘记密码」一致），当前 Cookie 立即失效，前端需引导用户重新登录。</p>
+     *
+     * @param editPasswordDTO 目标用户内部 id、新密码与确认密码
+     * @return 修改结果提示
      */
     @SaCheckLogin
     @PostMapping("/editPassword")
     @RateLimit(limit = 5, window = 60, prefix = "password")
-    public BaseResponse<String> editUserPassword(Long id,String password){
-        userService.editUserPassword(id,password);
-        return ResultUtils.success("修改密码成功");
+    public BaseResponse<String> editUserPassword(@RequestBody EditPasswordDTO editPasswordDTO){
+        userService.editUserPassword(editPasswordDTO);
+        return ResultUtils.success("修改密码成功，请重新登录");
     }
 
     /**

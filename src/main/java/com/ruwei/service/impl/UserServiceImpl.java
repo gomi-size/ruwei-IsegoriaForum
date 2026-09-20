@@ -147,6 +147,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         String nikeName=pathName+"_"+randomStr;
         user.setNickname(nikeName);
 
+        user.setEmail(email);
         //4.保存到数据库
         boolean result = save(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR,"注册失败");
@@ -383,30 +384,64 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
     /**
-     * 用户修改密码
-     * @param id
-     * @param password
+     * 用户修改自己的密码（已登录场景）。
+     *
+     * <p><b>本次修复的两个缺陷</b>：</p>
+     * <ol>
+     *   <li><b>id 语义错配</b>：原实现拿入参 {@code id} 与 {@code StpUtil.getLoginIdAsLong()}
+     *       直接比对。登录态里存的是<b>内部雪花主键</b>，而前端在多数场景持有的是
+     *       <b>对外编码 userId</b>（base 100000），两者数值域不重叠，
+     *       用 {@code !=} 比较必然失败，本人改密码也会被判「无权限」。
+     *       现统一按内部主键传参并做显式等值校验。</li>
+     *   <li><b>缺少密码一致性校验</b>：原实现只收一个 {@code password}，
+     *       前端两次输入不一致时无服务端兜底。现补 {@code checkPassword} 校验。</li>
+     * </ol>
+     *
+     * <p><b>为何要在改密后登出</b>：与 {@link #forgetPassword} 对齐 ——
+     * 密码已变更，旧登录态必须失效，否则凭旧会话仍可持续访问。</p>
+     *
+     * @param editPasswordDTO 目标用户内部 id、新密码与确认密码
      */
     @Override
-    public void editUserPassword(Long id, String password) {
-        ThrowUtils.throwIf(id==null||password==null,ErrorCode.PARAMS_ERROR,"参数不能为空");
-        long userId = StpUtil.getLoginIdAsLong();
-        if (userId!=id){
-            ThrowUtils.throwIf(true,ErrorCode.NO_AUTH_ERROR,"无权限,只有本人");
-        }
-        ThrowUtils.throwIf(getById(userId)==null,ErrorCode.NOT_FOUND_ERROR,"无当前用户");
-        // 密码：8~12位，不能全为数字
+    public void editUserPassword(EditPasswordDTO editPasswordDTO) {
+        ThrowUtils.throwIf(BeanUtil.isEmpty(editPasswordDTO)
+                        || editPasswordDTO.getId() == null
+                        || StrUtil.isBlank(editPasswordDTO.getPassword()),
+                ErrorCode.PARAMS_ERROR, "参数不能为空");
+
+        String password = editPasswordDTO.getPassword();
+        String checkPassword = editPasswordDTO.getCheckPassword();
+
+        // 1.越权校验：登录态中的内部 id 必须与入参一致。
+        //   getLoginIdAsLong() 返回基本类型 long，需显式装箱后再比较，
+        //   否则 Objects.equals(Object, Object) 在 Long 缓存区间（-128~127）之外
+        //   会退化为引用比较，雪花 id 必然不等而误判「无权限」。
+        Long loginId = StpUtil.getLoginIdAsLong();
+        ThrowUtils.throwIf(!Objects.equals(loginId, editPasswordDTO.getId()),
+                ErrorCode.NO_AUTH_ERROR, "无权限，只能修改本人的密码");
+
+        long targetId = loginId;
+        ThrowUtils.throwIf(getById(targetId) == null, ErrorCode.NOT_FOUND_ERROR, "当前用户不存在");
+
+        // 2.密码强度：与注册、找回密码保持一致
         ThrowUtils.throwIf(password.length() < 8 || password.length() > 12,
                 ErrorCode.PARAMS_ERROR, "密码长度必须为8~12位");
         ThrowUtils.throwIf(password.matches("^\\d+$"),
                 ErrorCode.PARAMS_ERROR, "密码不能全为数字");
+        ThrowUtils.throwIf(!password.equals(checkPassword),
+                ErrorCode.PARAMS_ERROR, "两次密码不相等");
 
+        // 3.BCrypt 加密后写入（哈希串内含盐，禁止明文落库）
         String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
-        User user=new User();
-        user.setPassword(encryptedPassword);
-        user.setId(id);
-        boolean result = updateById(user);
-        ThrowUtils.throwIf(!result,ErrorCode.OPERATION_ERROR,"修改密码未成功");
+        boolean result = lambdaUpdate()
+                .eq(User::getId, targetId)
+                .set(User::getPassword, encryptedPassword)
+                .update();
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "修改密码未成功");
+
+        // 4.密码已变更 → 销毁该账号全部历史会话，旧登录态立即失效。
+        //   注意：登出后当前请求的 Cookie 即失效，前端需引导用户重新登录。
+        StpUtil.logout(targetId);
     }
 
     /**

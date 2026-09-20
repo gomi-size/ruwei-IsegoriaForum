@@ -60,8 +60,17 @@ public class EmailCodeServiceImpl implements EmailCodeService {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
-    @Resource
-    private MailSender mailSender;
+    /**
+     * 邮件发送能力。
+     *
+     * <p><b>Bean 名必须显式指定为 {@code asyncMailSender}</b>：{@code @Resource} 默认按字段名解析，
+     * 而 {@code spring-boot-starter-mail} 在检测到 {@code spring.mail.host} 后会自动装配一个
+     * {@code JavaMailSenderImpl}，其默认 Bean 名恰好是 {@code mailSender}。
+     * 若字段名也叫 {@code mailSender}，注入到的将是自动装配的 {@code JavaMailSenderImpl}
+     * 而非本接口的实现，启动即抛 {@code BeanNotOfRequiredTypeException}。</p>
+     */
+    @Resource(name = "asyncMailSender")
+    private MailSender asyncMailSender;
 
     @Resource
     private MailProperties mailProperties;
@@ -102,7 +111,7 @@ public class EmailCodeServiceImpl implements EmailCodeService {
                 Duration.ofSeconds(mailProperties.getCodeTtlSeconds()));
         // 5) 异步投递。MailSender 实现内部 try-catch，失败只记日志不回传，
         //    因此「发信失败」时本接口仍返回成功 —— 用户可自行重试，无需感知。
-        mailSender.sendVerifyCode(email, code, scene);
+        asyncMailSender.sendVerifyCode(email, code, scene);
     }
 
 
@@ -186,7 +195,10 @@ public class EmailCodeServiceImpl implements EmailCodeService {
      */
     private Long readCounter(String key) {
         String value = stringRedisTemplate.opsForValue().get(key);
-        if(StrUtil.isNotBlank(value)){
+        // key 不存在（当日尚未发过码）→ 计为 0。
+        // 注意：此处必须是 isBlank 才返回 0；若写成 isNotBlank 返回 0，
+        // 会导致计数器一旦有值就恒为 0，日上限判断永远不成立（限流形同虚设）。
+        if (StrUtil.isBlank(value)) {
             return 0L;
         }
         try {

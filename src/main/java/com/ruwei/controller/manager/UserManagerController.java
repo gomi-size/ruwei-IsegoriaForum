@@ -241,18 +241,16 @@ public class UserManagerController {
     }
 
 
-    /**
-     * 修改密码
-     * @param id
-     * @param password
-     * @return
+    /*
+     * 原「修改密码」接口 POST /admin/user/editPassword (Long id, String password) 已移除。
+     *
+     * 移除原因：它与下方 POST /admin/user/forgetPassword（adminResetPassword）职责完全重叠，
+     * 且只带 @SaCheckLogin 而不校验 id 与登录态是否一致 ——
+     * 任意已登录用户都能借它重置<b>他人</b>密码，属越权入口。
+     *
+     * 管理员代改他人密码请统一走下方的 /forgetPassword（已标注 @SaCheckRole("admin")）；
+     * 用户改自己的密码走 C 端 POST /user/editPassword。
      */
-    @SaCheckLogin
-    @PostMapping("/editPassword")
-    public BaseResponse<String> editUserPassword(Long id,String password){
-        userService.editUserPassword(id,password);
-        return ResultUtils.success("修改密码成功");
-    }
 
     /**
      * 管理员：重置指定用户的密码（后台运维场景）。
