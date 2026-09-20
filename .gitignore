@@ -1,6 +1,8 @@
 ### Custom ###
+# 含明文的库/中间件/COS/SMTP 凭据，禁止入库；模板见各文件内的 ${ENV} 占位说明
 src/main/resources/application-local.yml
 src/main/resources/application-prod.yml
+src/main/resources/application-docker.yml
 
 
 HELP.md
