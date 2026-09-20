@@ -101,7 +101,10 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
         Long targetId = resolveTargetInternalId(id, userId);
 
         // 不能关注自己
-        ThrowUtils.throwIf(loginId == targetId, ErrorCode.OPERATION_ERROR, "无法关注自己");
+        // 注意：loginId 是 long 基本类型，targetId 是 Long 包装类型，
+        // 直接写 loginId == targetId 会触发拆箱/引用比较陷阱（超出 Long 缓存区间即恒为 false），
+        // 而雪花 id 恒为大数，故必须用 Objects.equals 做数值比较。
+        ThrowUtils.throwIf(Objects.equals(Long.valueOf(loginId), targetId), ErrorCode.OPERATION_ERROR, "无法关注自己");
 
         // 查已有记录（均以内部 id 为键）
         UserFollow one = lambdaQuery().eq(UserFollow::getFollowerId, loginId)
@@ -169,7 +172,8 @@ public class UserFollowServiceImpl extends ServiceImpl<UserFollowMapper, UserFol
         long loginId = StpUtil.getLoginIdAsLong();
         Long targetId = resolveTargetInternalId(id, userId);
 
-        ThrowUtils.throwIf(loginId == targetId, ErrorCode.OPERATION_ERROR, "无法取消关注自己");
+        // 不能取消关注自己（同 followUser 的装箱比较陷阱，见该方法内注释）
+        ThrowUtils.throwIf(Objects.equals(Long.valueOf(loginId), targetId), ErrorCode.OPERATION_ERROR, "无法取消关注自己");
 
         UserFollow one = lambdaQuery().eq(UserFollow::getFollowerId, loginId)
                 .eq(UserFollow::getFolloweeId, targetId)
