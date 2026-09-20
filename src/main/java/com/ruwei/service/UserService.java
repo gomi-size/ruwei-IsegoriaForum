@@ -1,6 +1,7 @@
 package com.ruwei.service;
 
 import com.baomidou.mybatisplus.spring.service.IService;
+import com.ruwei.domain.dto.EmailResetPasswordDTO;
 import com.ruwei.domain.dto.UserEditDTO;
 import com.ruwei.domain.dto.UserLoginDTO;
 import com.ruwei.domain.dto.UserRegisterDTO;
@@ -58,10 +59,26 @@ public interface UserService extends IService<User> {
     void editUserPassword(Long id, String password);
 
     /**
-     * 忘记密码
-     * @param userId
+     * 忘记密码：凭邮箱验证码重置密码（未登录场景）。
+     *
+     * <p>必须以「邮箱 + 该邮箱收到的验证码」作为身份凭证 —— 原实现仅凭 {@code userId}
+     * 即可重置任意账号密码，属可被利用的越权漏洞，已整体废弃。</p>
+     *
+     * @param resetPasswordDTO 邮箱、验证码、新密码与确认密码
      */
-    void forgetPassword(Long userId,String Password);
+    void forgetPassword(EmailResetPasswordDTO resetPasswordDTO);
+
+    /**
+     * 管理员重置指定用户的密码（后台运维场景）。
+     *
+     * <p>与 {@link #forgetPassword} 的区别：本方法由已鉴权的管理员调用，
+     * 管理员权限本身即身份凭证，因此无需邮箱验证码；调用方必须标注
+     * {@code @SaCheckRole("admin")}，否则等同于开放越权重置入口。</p>
+     *
+     * @param userId   目标用户（兼容对外编码 userId 与内部主键 id）
+     * @param password 新密码
+     */
+    void adminResetPassword(Long userId, String password);
 
     /**
      * 当前登录用户获取别人的详情（按对外编码 userId 查找，供前端直接调用于查看他人主页）

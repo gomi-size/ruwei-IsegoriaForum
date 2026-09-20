@@ -15,6 +15,16 @@ public class UserRegisterDTO  {
     private String username;
 
     /**
+     * 邮箱
+     */
+    private String email;
+
+    /**
+     * 邮箱验证码
+     */
+    private String code;
+
+    /**
      * 密码
      */
     private String password;
@@ -23,5 +33,6 @@ public class UserRegisterDTO  {
      * 密码
      */
     private String checkPassword;
+
 
 }

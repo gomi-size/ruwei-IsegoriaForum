@@ -195,15 +195,24 @@ public class UserManagerController {
     }
 
     /**
-     * 忘记密码
-     * @param userId
-     * @param Password
-     * @return
+     * 管理员：重置指定用户的密码（后台运维场景）。
+     *
+     * <p>仅管理员可访问 —— {@code @SaCheckRole("admin")}。管理员权限本身即身份凭证，
+     * 因此无需邮箱验证码。</p>
+     *
+     * <p><b>修复说明</b>：原实现无任何鉴权注解，等于开放了一个「未登录即可重置他人密码」
+     * 的入口；同时 {@code password} 参数由大写 {@code Password} 改为小写，
+     * 前端若在调用需同步调整。</p>
+     *
+     * @param userId   目标用户（兼容对外编码与内部主键）
+     * @param password 新密码
+     * @return 操作结果
      */
+    @SaCheckRole("admin")
     @PostMapping("/forgetPassword")
-    public BaseResponse<Boolean> forgetPassword(Long userId,String Password){
-        userService.forgetPassword(userId,Password);
-        return ResultUtils.success(true);
+    public BaseResponse<String> forgetPassword(Long userId, String password){
+        userService.adminResetPassword(userId, password);
+        return ResultUtils.success("密码重置成功");
     }
 
 }
