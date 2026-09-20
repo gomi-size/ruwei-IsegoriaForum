@@ -1,10 +1,7 @@
 package com.ruwei.service;
 
 import com.baomidou.mybatisplus.spring.service.IService;
-import com.ruwei.domain.dto.EmailResetPasswordDTO;
-import com.ruwei.domain.dto.UserEditDTO;
-import com.ruwei.domain.dto.UserLoginDTO;
-import com.ruwei.domain.dto.UserRegisterDTO;
+import com.ruwei.domain.dto.*;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.vo.UserVO;
 
@@ -30,6 +27,17 @@ public interface UserService extends IService<User> {
      */
     User userLogin(UserLoginDTO userLogin);
 
+    /**
+     * 用户使用邮箱验证码登录。
+     *
+     * <p>与 {@link #userLogin} 的区别：{@link #userLogin} 校验「用户名 + 密码」，
+     * 本方法校验「邮箱 + 该邮箱收到的验证码」，两者共用同一套登录态建立流程。</p>
+     *
+     * @param emailLoginDTO 邮箱与验证码
+     * @return 命中的用户实体
+     */
+    User emailLogin(EmailLoginDTO emailLoginDTO);
+
 
     /**
      * 判断是否为管理员
@@ -44,6 +52,21 @@ public interface UserService extends IService<User> {
      * @return 是否修改成功
      */
     boolean updateUserStatus(Long userId, Integer status);
+
+    /**
+     * 管理员：设置 / 取消指定用户的管理员身份（对应 user 表 admin 标志位）。
+     *
+     * <p>角色本身由 {@code StpInterfaceImpl} 在每次鉴权时<b>实时</b>读取 admin 字段，
+     * 因此目标用户无需重新登录，改完下一次请求即生效。</p>
+     *
+     * <p>两条业务防护：不允许管理员取消自己的管理员身份；取消时须保证系统中
+     * 至少保留一名管理员，避免后台被彻底锁死。</p>
+     *
+     * @param userId 目标用户（兼容对外编码 userId 与内部主键 id）
+     * @param admin  目标身份：AdminEnum.Admin(1) 设为管理员，AdminEnum.User(0) 取消管理员
+     * @return 是否修改成功（目标已是该身份时返回 true，幂等）
+     */
+    boolean updateUserAdmin(Long userId, Integer admin);
 
     /**
      * 用户编辑
@@ -92,4 +115,6 @@ public interface UserService extends IService<User> {
      * @param id 对方的内部主键
      */
     UserVO getOtherUserVOInfoById(Long id);
+
+
 }

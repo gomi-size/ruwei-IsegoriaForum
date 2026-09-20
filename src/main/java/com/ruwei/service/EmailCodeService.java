@@ -30,4 +30,24 @@ public interface EmailCodeService {
      * @param code  用户提交的验证码明文
      */
     void consumeCode(String email, EmailScene scene, String code);
+
+    /**
+     * 发送验证码到指定邮箱（含完整的发送频率控制）。
+     *
+     * <p>频率控制共四道，按「先便宜后昂贵」的顺序判定：</p>
+     * <ol>
+     *   <li>单邮箱日上限（只读预检，不消耗配额）</li>
+     *   <li>单 IP 日上限（只读预检）</li>
+     *   <li>单邮箱冷却：{@code SETNX} 原子抢占，防连点与并发重复投递</li>
+     *   <li>注解层 IP 限流：由 Controller 上的 {@code @RateLimit} 承担</li>
+     * </ol>
+     *
+     * <p><b>本方法不返回验证码</b>，且日志中也不打印验证码明文，避免验证码经由接口响应或日志泄露。
+     * 验证码仅通过邮件送达用户。</p>
+     *
+     * @param email    目标邮箱
+     * @param scene    使用场景（决定 key 命名空间与邮件文案）
+     * @param clientIp 客户端 IP，用于 IP 维度日限流；可为 null（则跳过该维度）
+     */
+    void sendCode(String email, EmailScene scene, String clientIp);
 }

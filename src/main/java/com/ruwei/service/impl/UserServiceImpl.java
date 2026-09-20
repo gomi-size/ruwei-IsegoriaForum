@@ -12,10 +12,7 @@ import com.ruwei.common.ThrowUtils;
 import com.ruwei.domain.Enum.AdminEnum;
 import com.ruwei.domain.Enum.EmailScene;
 import com.ruwei.domain.Enum.StatusEnum;
-import com.ruwei.domain.dto.EmailResetPasswordDTO;
-import com.ruwei.domain.dto.UserEditDTO;
-import com.ruwei.domain.dto.UserLoginDTO;
-import com.ruwei.domain.dto.UserRegisterDTO;
+import com.ruwei.domain.dto.*;
 import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
@@ -130,7 +127,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         boolean exists = lambdaQuery().eq(User::getUsername, username).exists();
         ThrowUtils.throwIf(exists,ErrorCode.OPERATION_ERROR,"用户名已被注册了");
 
-        //检测验证码是否正确
+        //检查邮箱唯一性
+        boolean emailExists = lambdaQuery().eq(User::getEmail, email).exists();
+        ThrowUtils.throwIf(emailExists, ErrorCode.OPERATION_ERROR, "该邮箱已被注册，请直接登录或使用其它邮箱");
+
+        //检测验证码是否正确并消费
         emailCodeService.consumeCode(email, EmailScene.REGISTER, userRegisterDTO.getCode());
         //2.加密密码
         String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
@@ -149,7 +150,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         //4.保存到数据库
         boolean result = save(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR,"注册失败");
-
 
         return user;
 
@@ -203,6 +203,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     /**
      * 用户使用邮箱登录
      */
+    @Override
+    public User emailLogin(EmailLoginDTO emailLoginDTO) {
+        //1.校验参数
+        ThrowUtils.throwIf(BeanUtil.isEmpty(emailLoginDTO), ErrorCode.PARAMS_ERROR, "参数不能为空");
+        String email = emailLoginDTO.getEmail();
+        String code = emailLoginDTO.getCode();
+        ThrowUtils.throwIf(StrUtil.isBlank(email) || StrUtil.isBlank(code),
+                ErrorCode.PARAMS_ERROR, "邮箱与验证码均不能为空");
+        ThrowUtils.throwIf(!email.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"),
+                ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
+
+        emailCodeService.consumeCode(email, EmailScene.LOGIN, code);
+
+        // 2.按邮箱定位账号
+        User user = lambdaQuery().eq(User::getEmail, email).one();
+        ThrowUtils.throwIf(BeanUtil.isEmpty(user), ErrorCode.NOT_FOUND_ERROR, "该邮箱尚未注册");
+
+        // 3.校验账号状态
+        //    注意 status 可能为 null，getByCode 会返回 null —— 此处必须显式判空，
+        //    否则直接用 statusEnum.equals(...) 会 NPE
+        StatusEnum statusEnum = user.getStatus() == null ? null : StatusEnum.getByCode(user.getStatus());
+        ThrowUtils.throwIf(!StatusEnum.NORMAL.equals(statusEnum),
+                ErrorCode.USER_ERROR, "账号异常无法登录，请联系管理员");
+
+        return user;
+    }
+
 
 
     /**
@@ -230,6 +257,72 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         user.setStatus(status);
         return this.updateById(user);
+    }
+
+    /**
+     * 管理员：设置 / 取消指定用户的管理员身份（对应 user 表 admin 标志位）。
+     *
+     * <p><b>入参兼容双主键</b>：先按对外编码 {@code userId} 查询，查不到再按内部主键 {@code id}
+     * 查询（两种 id 数值域不重叠，不会误匹配）；与 {@link #adminResetPassword} 保持同一套解析规则，
+     * 因为后台用户列表返回的是内部 id、而用户主页拿到的是对外编码。</p>
+     *
+     * <p><b>为什么这个方法是高危方法</b>：admin 是 Sa-Token 角色体系的唯一数据源
+     * （见 {@code StpInterfaceImpl#getRoleList}），能写这个字段就等于能授予 / 收回后台权限，
+     * 因此调用方必须标注 {@code @SaCheckRole("admin")}，否则等同于开放「任意用户自我提权」入口。</p>
+     *
+     * <p><b>两条防护</b>：</p>
+     * <ul>
+     *   <li>不允许管理员取消自己的管理员身份 —— 防止手滑把自己踢出后台；</li>
+     *   <li>取消管理员时校验系统内管理员数量，至少保留一名 —— 防止后台被彻底锁死。</li>
+     * </ul>
+     *
+     * <p><b>生效时机</b>：Sa-Token 1.41 未启用角色 / 权限缓存，每次鉴权都会回调
+     * {@code StpInterfaceImpl} 现查数据库，因此改完<b>无需目标用户重新登录</b>，
+     * 他的下一次请求就会带上新的 admin 角色。</p>
+     *
+     * @param userId 目标用户（兼容对外编码 userId 与内部主键 id）
+     * @param admin  目标身份：{@link AdminEnum#Admin}(1) 设为管理员，{@link AdminEnum#User}(0) 取消管理员
+     * @return 是否修改成功（目标已是该身份时直接返回 true，保证幂等）
+     */
+    @Override
+    public boolean updateUserAdmin(Long userId, Integer admin) {
+        ThrowUtils.throwIf(userId == null || admin == null || !AdminEnum.isValid(admin),
+                ErrorCode.PARAMS_ERROR, "参数不合法");
+
+        // 兼容双主键：先按对外编码 userId 查，查不到再按内部主键 id 查
+        User user = lambdaQuery().eq(User::getUserId, userId).one();
+        if (BeanUtil.isEmpty(user)) {
+            user = getById(userId);
+        }
+        ThrowUtils.throwIf(BeanUtil.isEmpty(user), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+
+        // 幂等：目标已是该身份，直接返回成功，避免无意义的 update 与前端误报失败
+        int current = user.getAdmin() != null ? user.getAdmin() : AdminEnum.User.getCode();
+        if (current == admin) {
+            return true;
+        }
+
+        // 防护 1：不允许管理员取消自己，防止误操作把自己踢出后台
+        ThrowUtils.throwIf(AdminEnum.isAdmin(current) && !AdminEnum.isAdmin(admin)
+                        && Objects.equals(user.getId(), StpUtil.getLoginIdAsLong()),
+                ErrorCode.NO_AUTH_ERROR, "不能取消自己的管理员身份");
+
+        // 防护 2：取消管理员时须保证系统仍有其他管理员，避免后台被彻底锁死
+        if (!AdminEnum.isAdmin(admin)) {
+            long adminCount = lambdaQuery().eq(User::getAdmin, AdminEnum.Admin.getCode()).count();
+            ThrowUtils.throwIf(adminCount <= 1, ErrorCode.OPERATION_ERROR, "系统至少需保留一名管理员");
+        }
+
+        boolean result = lambdaUpdate()
+                .eq(User::getId, user.getId())
+                .set(User::getAdmin, admin)
+                .update();
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "修改管理员身份失败");
+
+        // 提权 / 降权是敏感操作，留一条服务端日志便于事后追溯
+        log.info("管理员 {} 将用户 {}(id={}) 的管理员身份修改为 {}", StpUtil.getLoginIdAsLong(),
+                user.getUserId(), user.getId(), admin);
+        return true;
     }
 
     /**
@@ -271,8 +364,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                 ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
 
         // ===== 敏感词/违禁词检查（新增）=====
-        // 仅对“用户可自由输入的展示字段”做检查，且只在字段非空时执行：
-        // 命中任意敏感词（替换/拦截/审核）即由 checkStrict 抛 PARAMS_ERROR 拒绝本次编辑。
         if (StrUtil.isNotBlank(userEditDTO.getNickname())) {
             sensitiveWordFilter.checkStrict(userEditDTO.getNickname(), "昵称");
         }
@@ -288,7 +379,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新信息失败");
 
         // 用户资料变更 → 异步重建该作者全部 ES 帖子（昵称/头像冗余在 PostDoc，需重新索引）
-        // 注意用被编辑者 id（管理员代改他人资料时也正确）
         eventPublisher.publishEvent(new UserProfileUpdatedEvent(this, userEditDTO.getId()));
     }
 

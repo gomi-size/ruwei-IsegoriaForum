@@ -73,4 +73,25 @@ public final class EmailCodeKeys {
     public static String cooldownKey(String email) {
         return COOLDOWN_PREFIX + email;
     }
+
+    /**
+     * 构建单邮箱日发送计数 key。
+     *
+     * @param email 目标邮箱
+     * @return 完整 Redis key
+     */
+    public static String dailyEmailKey(String email) {
+        return DAILY_EMAIL_PREFIX + email;
+    }
+
+    /**
+     * 构建单 IP 日发送计数 key。
+     *
+     * @param clientIp 客户端 IP
+     * @return 完整 Redis key
+     */
+    public static String dailyIpKey(String clientIp) {
+        return DAILY_IP_PREFIX + clientIp;
+    }
+
 }
