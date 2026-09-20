@@ -15,15 +15,16 @@ import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
-import com.ruwei.domain.dto.UserEditDTO;
-import com.ruwei.domain.dto.UserLoginDTO;
-import com.ruwei.domain.dto.UserQueryDTO;
-import com.ruwei.domain.dto.UserRegisterDTO;
+import com.ruwei.domain.Enum.EmailScene;
+import com.ruwei.domain.dto.*;
 import com.ruwei.domain.empty.User;
+import com.ruwei.domain.utils.ClientIpUtils;
 import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
+import com.ruwei.service.EmailCodeService;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -37,6 +38,9 @@ public class UserController {
 
     @Resource
     private UserService userService;
+    @Resource
+    private EmailCodeService emailCodeService;
+
 
     /**
      * 用户注册
@@ -44,13 +48,60 @@ public class UserController {
      * @return
      */
     @PostMapping("/register")
-    //@RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
     public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
 
         User user= userService.userRegister(userRegisterDTO);
         StpUtil.login(user.getId());
 
         return ResultUtils.success("注册成功");
+    }
+    /**
+     * 发送邮箱验证码。
+     *
+     * <p>未登录可调。限流分三层：</p>
+     * <ul>
+     *   <li>注解层 IP 维度：10 次/10 分钟 + 30 次/小时</li>
+     *   <li>业务层邮箱维度：60 秒冷却 + 单邮箱日上限（注解层拿不到邮箱维度 ——
+     *       本接口未登录，{@code RateLimitAspect} 会回退到 IP 维度）</li>
+     *   <li>业务层 IP 维度日上限</li>
+     * </ul>
+     *
+     * <p><b>响应文案与邮箱是否已注册无关</b>，一律返回成功 ——
+     * 否则本接口会沦为「批量探测某邮箱是否注册过本站」的工具。</p>
+     *
+     * @param sendDTO 邮箱与场景
+     * @param request 用于解析客户端 IP
+     * @return 发送结果提示
+     */
+    @PostMapping("/email/code")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "emailCode")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 30, window = 3600, prefix = "emailCode")
+    public BaseResponse<String> sendEmailCode(@RequestBody EmailCodeSendDTO sendDTO,
+                                              HttpServletRequest request) {
+        EmailScene scene = EmailScene.getByCode(sendDTO.getScene());
+        ThrowUtils.throwIf(scene == null, ErrorCode.PARAMS_ERROR, "不支持的验证码场景");
+
+        emailCodeService.sendCode(sendDTO.getEmail(), scene, ClientIpUtils.getClientIp(request));
+
+        return ResultUtils.success("验证码已发送，请查收邮箱");
+    }
+
+    /**
+     * 邮箱验证码登录。
+     *
+     * <p>与 {@link #userLogin} 并存：老用户继续走用户名密码，新用户可走邮箱验证码，
+     * 两条通道互不影响，可按入口灰度回滚。</p>
+     *
+     * @param emailLoginDTO 邮箱与验证码
+     * @return 登录用户信息
+     */
+    @PostMapping("/email/login")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "emailLogin")
+    public BaseResponse<UserVO> emailLogin(@RequestBody EmailLoginDTO emailLoginDTO) {
+        User user = userService.emailLogin(emailLoginDTO);
+        StpUtil.login(user.getId());
+        return ResultUtils.success(BeanUtil.copyProperties(user, UserVO.class));
     }
 
     /**
@@ -59,7 +110,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/login")
-    //@RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "login")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "login")
     public BaseResponse<UserVO> userLogin(@RequestBody UserLoginDTO userLogin) {
         User user = userService.userLogin(userLogin);
         StpUtil.login(user.getId());
@@ -126,48 +177,6 @@ public class UserController {
         return ResultUtils.success(userVO);
     }
 
-    /**
-     * 管理员：修改指定用户的状态（禁用 / 启用 / 注销）—— 对应“用户状态权”
-     * 仅管理员可访问 —— @SaCheckRole("admin")
-     */
-    @SaCheckRole("admin")
-    @PostMapping("/status")
-    public BaseResponse<String> updateUserStatus(@RequestParam Long Id,
-                                                 @RequestParam Integer status) {
-        ThrowUtils.throwIf(Id==null||status==null,ErrorCode.PARAMS_ERROR,"有一个为空");
-        boolean result = userService.updateUserStatus(Id, status);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "修改用户状态失败");
-        return ResultUtils.success("修改成功");
-    }
-
-    /**
-     * 管理员查看所有用户列表
-     * @return
-     */
-    @SaCheckRole("admin")
-    @PostMapping("/list")
-    public BaseResponse<IPage<User>> listAllUsers(@RequestBody  UserQueryDTO userQueryDTO) {
-        QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
-        IPage<User> userPage = userService.page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
-        userPage.convert(user -> {
-            user.setPassword("*****");
-            return user;
-        });
-        return ResultUtils.success(userPage);
-    }
-
-    /**
-     * 管理员：查看任意指定用户的完整信息
-     * 仅管理员可访问 —— @SaCheckRole("admin")（普通用户看自己请用 /user/userInfo）
-     */
-    @SaCheckRole("admin")
-    @GetMapping("/getUserInfo")
-    public BaseResponse<User> getUserInfo( @RequestParam  Long id) {
-        ThrowUtils.throwIf(id==null,ErrorCode.PARAMS_ERROR,"传入的用户id不能为空");
-        User user = userService.getById(id);
-        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
-        return ResultUtils.success(user);
-    }
 
     /**
      * 用户编辑信息
@@ -198,16 +207,23 @@ public class UserController {
     }
 
     /**
-     * 忘记密码
-     * @param userId
-     * @param Password
-     * @return
+     * 忘记密码：凭邮箱验证码重置密码（未登录场景）。
+     *
+     * <p>身份凭证为「邮箱 + 该邮箱收到的验证码」，验证码场景固定为
+     * {@code EmailScene.RESET_PASSWORD}，需先调用发码接口获取验证码。</p>
+     *
+     * <p><b>契约变更（前端需同步调整）</b>：入参由 query 参数 {@code ?userId=&Password=}
+     * 改为 JSON 请求体 {@link EmailResetPasswordDTO}；返回体由 {@code Boolean}
+     * 改为提示文案 {@code String}。原入参形式无任何身份校验，属越权漏洞，不可继续沿用。</p>
+     *
+     * @param resetPasswordDTO 邮箱、验证码、新密码与确认密码
+     * @return 重置结果提示
      */
     @PostMapping("/forgetPassword")
     @RateLimit(dimension = RateLimitDimension.IP, limit = 1, window = 60, prefix = "forget")
     @RateLimit(dimension = RateLimitDimension.IP, limit = 5, window = 3600, prefix = "forget")
-    public BaseResponse<Boolean> forgetPassword(Long userId,String Password){
-        userService.forgetPassword(userId,Password);
-        return ResultUtils.success(true);
+    public BaseResponse<String> forgetPassword(@RequestBody EmailResetPasswordDTO resetPasswordDTO){
+        userService.forgetPassword(resetPasswordDTO);
+        return ResultUtils.success("密码重置成功");
     }
 }

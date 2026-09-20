@@ -15,26 +15,30 @@ import com.ruwei.common.BaseResponse;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ResultUtils;
 import com.ruwei.common.ThrowUtils;
-import com.ruwei.domain.dto.UserEditDTO;
-import com.ruwei.domain.dto.UserLoginDTO;
-import com.ruwei.domain.dto.UserQueryDTO;
-import com.ruwei.domain.dto.UserRegisterDTO;
+import com.ruwei.domain.Enum.AdminEnum;
+import com.ruwei.domain.Enum.EmailScene;
+import com.ruwei.domain.dto.*;
 import com.ruwei.domain.empty.User;
+import com.ruwei.domain.utils.ClientIpUtils;
 import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
+import com.ruwei.service.EmailCodeService;
 import com.ruwei.service.UserService;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
 /**
  * 用户的基础管理
  */
 @RestController
-@RequestMapping("/amin/user")
+@RequestMapping("/admin/user")
 public class UserManagerController {
 
     @Resource
     private UserService userService;
+    @Resource
+    private EmailCodeService emailCodeService;
 
     /**
      * 用户注册
@@ -65,6 +69,35 @@ public class UserManagerController {
         ThrowUtils.throwIf(!admin,ErrorCode.NO_AUTH_ERROR,"只能是管理员登录");
         UserVO userVO = BeanUtil.copyProperties(user, UserVO.class);
         return ResultUtils.success(userVO);
+    }
+    @PostMapping("/email/code")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "emailCode")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 30, window = 3600, prefix = "emailCode")
+    public BaseResponse<String> sendEmailCode(@RequestBody EmailCodeSendDTO sendDTO,
+                                              HttpServletRequest request) {
+        EmailScene scene = EmailScene.getByCode(sendDTO.getScene());
+        ThrowUtils.throwIf(scene == null, ErrorCode.PARAMS_ERROR, "不支持的验证码场景");
+
+        emailCodeService.sendCode(sendDTO.getEmail(), scene, ClientIpUtils.getClientIp(request));
+
+        return ResultUtils.success("验证码已发送，请查收邮箱");
+    }
+
+    /**
+     * 邮箱验证码登录。
+     *
+     * <p>与 {@link #userLogin} 并存：老用户继续走用户名密码，新用户可走邮箱验证码，
+     * 两条通道互不影响，可按入口灰度回滚。</p>
+     *
+     * @param emailLoginDTO 邮箱与验证码
+     * @return 登录用户信息
+     */
+    @PostMapping("/email/login")
+    @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "emailLogin")
+    public BaseResponse<UserVO> emailLogin(@RequestBody EmailLoginDTO emailLoginDTO) {
+        User user = userService.emailLogin(emailLoginDTO);
+        StpUtil.login(user.getId());
+        return ResultUtils.success(BeanUtil.copyProperties(user, UserVO.class));
     }
 
     /**
@@ -140,6 +173,33 @@ public class UserManagerController {
     }
 
     /**
+     * 管理员：设置 / 取消指定用户的管理员身份 —— 对应“用户角色权”
+     *
+     * <p>仅管理员可访问 —— {@code @SaCheckRole("admin")}。角色由 user 表的 admin 标志位驱动
+     * （见 {@code StpInterfaceImpl}），本接口是<b>唯一能授予 admin 角色的入口</b>，
+     * 因此 {@code @SaCheckRole} 注解不可移除 —— 一旦缺失，等同于开放
+     * 「任意登录用户把自己提权为管理员」的最高危越权漏洞。</p>
+     *
+     * <p><b>生效时机</b>：Sa-Token 1.41 无角色缓存，鉴权时实时查库，
+     * 因此被设置的用户<b>无需重新登录</b>，下一次请求即拥有 / 失去 admin 角色。</p>
+     *
+     * <p><b>两条防护</b>（见 {@code UserServiceImpl#updateUserAdmin}）：
+     * 不允许取消自己的管理员身份；取消时系统须至少保留一名管理员。</p>
+     *
+     * @param userId 目标用户（兼容对外编码 userId 与后台用户列表返回的内部主键 id）
+     * @param admin  目标身份：1-设为管理员，0-取消管理员（AdminEnum.code）
+     * @return 操作结果
+     */
+    @SaCheckRole("admin")
+    @PostMapping("/setAdmin")
+    public BaseResponse<String> setUserAdmin(@RequestParam Long userId,
+                                             @RequestParam Integer admin) {
+        boolean result = userService.updateUserAdmin(userId, admin);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "修改管理员身份失败");
+        return ResultUtils.success(AdminEnum.isAdmin(admin) ? "已设为管理员" : "已取消管理员");
+    }
+
+    /**
      * 管理员查看所有用户列表
      * @return
      */
@@ -195,15 +255,24 @@ public class UserManagerController {
     }
 
     /**
-     * 忘记密码
-     * @param userId
-     * @param Password
-     * @return
+     * 管理员：重置指定用户的密码（后台运维场景）。
+     *
+     * <p>仅管理员可访问 —— {@code @SaCheckRole("admin")}。管理员权限本身即身份凭证，
+     * 因此无需邮箱验证码。</p>
+     *
+     * <p><b>修复说明</b>：原实现无任何鉴权注解，等于开放了一个「未登录即可重置他人密码」
+     * 的入口；同时 {@code password} 参数由大写 {@code Password} 改为小写，
+     * 前端若在调用需同步调整。</p>
+     *
+     * @param userId   目标用户（兼容对外编码与内部主键）
+     * @param password 新密码
+     * @return 操作结果
      */
+    @SaCheckRole("admin")
     @PostMapping("/forgetPassword")
-    public BaseResponse<Boolean> forgetPassword(Long userId,String Password){
-        userService.forgetPassword(userId,Password);
-        return ResultUtils.success(true);
+    public BaseResponse<String> forgetPassword(Long userId, String password){
+        userService.adminResetPassword(userId, password);
+        return ResultUtils.success("密码重置成功");
     }
 
 }
