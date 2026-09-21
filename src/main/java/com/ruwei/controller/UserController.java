@@ -215,6 +215,24 @@ public class UserController {
     }
 
     /**
+     * 绑定（换绑）邮箱（已登录场景）。
+     *
+     * <p>身份凭证为「登录态 + 新邮箱验证码」（场景 {@code bindEmail}）：
+     * 需先调用 {@code POST /user/email/code} 向新邮箱发码。换绑成功后
+     * 旧邮箱立即无法再用于验证码登录与找回密码。</p>
+     *
+     * @param emailBindDTO 新邮箱与验证码
+     * @return 绑定结果提示
+     */
+    @SaCheckLogin
+    @PostMapping("/bindEmail")
+    @RateLimit(limit = 5, window = 60, prefix = "bindEmail")
+    public BaseResponse<String> bindEmail(@RequestBody EmailBindDTO emailBindDTO){
+        userService.bindEmail(emailBindDTO);
+        return ResultUtils.success("邮箱绑定成功");
+    }
+
+    /**
      * 忘记密码：凭邮箱验证码重置密码（未登录场景）。
      *
      * <p>身份凭证为「邮箱 + 该邮箱收到的验证码」，验证码场景固定为

@@ -86,6 +86,18 @@ public interface UserService extends IService<User> {
     void editUserPassword(EditPasswordDTO editPasswordDTO);
 
     /**
+     * 绑定（换绑）邮箱（已登录场景）。
+     *
+     * <p>身份凭证为「登录态 + 新邮箱收到的验证码」（场景
+     * {@code EmailScene.BIND_EMAIL}）：先消费验证码，再校验新邮箱未被
+     * 其它账号占用，最后更新当前登录用户的 email。换绑成功后旧邮箱
+     * 立即无法用于验证码登录与找回密码。</p>
+     *
+     * @param emailBindDTO 新邮箱与验证码
+     */
+    void bindEmail(EmailBindDTO emailBindDTO);
+
+    /**
      * 忘记密码：凭邮箱验证码重置密码（未登录场景）。
      *
      * <p>必须以「邮箱 + 该邮箱收到的验证码」作为身份凭证 —— 原实现仅凭 {@code userId}

@@ -445,6 +445,54 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
     /**
+     * 绑定（换绑）邮箱（已登录场景）。
+     *
+     * <p><b>身份凭证</b>：登录态 + 新邮箱收到的 {@code EmailScene.BIND_EMAIL}
+     * 验证码，因此无需旧邮箱配合；换绑成功后旧邮箱立即失效（验证码登录、
+     * 找回密码均按 user.email 当前值定位账号）。</p>
+     *
+     * <p><b>顺序说明</b>：先消费验证码再查重，与 {@link #forgetPassword} 同一原则 ——
+     * 不持有新邮箱验证码的请求无法探测某邮箱是否已被占用，防邮箱枚举。</p>
+     *
+     * @param emailBindDTO 新邮箱与验证码
+     */
+    @Override
+    public void bindEmail(EmailBindDTO emailBindDTO) {
+        ThrowUtils.throwIf(BeanUtil.isEmpty(emailBindDTO), ErrorCode.PARAMS_ERROR, "参数不能为空");
+
+        String email = emailBindDTO.getEmail();
+        String code = emailBindDTO.getCode();
+        ThrowUtils.throwIf(StrUtil.isBlank(email) || StrUtil.isBlank(code),
+                ErrorCode.PARAMS_ERROR, "邮箱与验证码均不能为空");
+        ThrowUtils.throwIf(!email.matches(EMAIL_REGEX),
+                ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
+
+        long loginId = StpUtil.getLoginIdAsLong();
+        User current = getById(loginId);
+        ThrowUtils.throwIf(BeanUtil.isEmpty(current), ErrorCode.NOT_FOUND_ERROR, "当前用户不存在");
+
+        // 与当前邮箱相同（忽略大小写）则直接提示，避免白白消费一次验证码
+        ThrowUtils.throwIf(email.equalsIgnoreCase(current.getEmail()),
+                ErrorCode.PARAMS_ERROR, "新邮箱与当前邮箱相同，无需更换");
+
+        // 1.消费新邮箱的 bindEmail 场景验证码（先于查重，防邮箱枚举）
+        emailCodeService.consumeCode(email, EmailScene.BIND_EMAIL, code);
+
+        // 2.新邮箱不能已被其它账号占用（与注册的邮箱唯一性校验同一口径）
+        boolean emailExists = lambdaQuery().eq(User::getEmail, email).exists();
+        ThrowUtils.throwIf(emailExists, ErrorCode.OPERATION_ERROR, "该邮箱已被其它账号绑定");
+
+        // 3.更新当前登录用户的邮箱
+        boolean result = lambdaUpdate()
+                .eq(User::getId, loginId)
+                .set(User::getEmail, email)
+                .update();
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "绑定邮箱失败");
+
+        log.info("用户换绑邮箱成功，内部 id={}", loginId);
+    }
+
+    /**
      * 忘记密码：凭邮箱验证码重置密码（未登录场景）。
      *
      * <p><b>修复说明</b>：原实现存在三个缺陷，本次一并修正 ——</p>
