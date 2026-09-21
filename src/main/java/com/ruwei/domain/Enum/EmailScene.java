@@ -25,10 +25,13 @@ public enum EmailScene {
     /** 登录：邮箱已注册时建立登录态 */
     LOGIN("login", "登录"),
 
-    /** 重置密码：凭邮箱验证码重置密码（替代原无校验的 forgetPassword 流程） */
+    /** 重置密码：凭邮箱验证码重置密码（未登录场景，替代原无校验的 forgetPassword 流程） */
     RESET_PASSWORD("resetPwd", "重置密码"),
 
-    /** 绑定邮箱：预留，本期未开放接口 */
+    /** 修改密码：已登录场景凭当前绑定邮箱验证码改密，与「重置密码」场景隔离 */
+    CHANGE_PASSWORD("changePwd", "修改密码"),
+
+    /** 绑定邮箱：换绑当前账号的绑定邮箱（已开放 POST /user/bindEmail） */
     BIND_EMAIL("bindEmail", "绑定邮箱");
 
     /** 场景编码（参与 Redis key 拼接） */

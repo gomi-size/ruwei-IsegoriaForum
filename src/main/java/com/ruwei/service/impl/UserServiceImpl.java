@@ -384,7 +384,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
     /**
-     * 用户修改自己的密码（已登录场景）。
+     * 用户修改自己的密码（已登录场景，需当前绑定邮箱验证码）。
+     *
+     * <p><b>身份凭证升级</b>：在登录态之外新增邮箱验证码（场景
+     * {@code EmailScene.CHANGE_PASSWORD}）—— 仅凭登录态即可改密的旧流程已废弃。
+     * 验证码发送至当前绑定邮箱，邮箱由服务端从登录态读取（前端只传 code），
+     * 防止校验被指向他人邮箱；消费顺序放在密码强度校验之后，弱密码请求
+     * 不会白白消耗一次验证码。</p>
      *
      * <p><b>本次修复的两个缺陷</b>：</p>
      * <ol>
@@ -400,13 +406,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      * <p><b>为何要在改密后登出</b>：与 {@link #forgetPassword} 对齐 ——
      * 密码已变更，旧登录态必须失效，否则凭旧会话仍可持续访问。</p>
      *
-     * @param editPasswordDTO 目标用户内部 id、新密码与确认密码
+     * @param editPasswordDTO 目标用户内部 id、邮箱验证码、新密码与确认密码
      */
     @Override
     public void editUserPassword(EditPasswordDTO editPasswordDTO) {
         ThrowUtils.throwIf(BeanUtil.isEmpty(editPasswordDTO)
                         || editPasswordDTO.getId() == null
-                        || StrUtil.isBlank(editPasswordDTO.getPassword()),
+                        || StrUtil.isBlank(editPasswordDTO.getPassword())
+                        || StrUtil.isBlank(editPasswordDTO.getCode()),
                 ErrorCode.PARAMS_ERROR, "参数不能为空");
 
         String password = editPasswordDTO.getPassword();
@@ -421,7 +428,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                 ErrorCode.NO_AUTH_ERROR, "无权限，只能修改本人的密码");
 
         long targetId = loginId;
-        ThrowUtils.throwIf(getById(targetId) == null, ErrorCode.NOT_FOUND_ERROR, "当前用户不存在");
+        User current = getById(targetId);
+        ThrowUtils.throwIf(current == null, ErrorCode.NOT_FOUND_ERROR, "当前用户不存在");
 
         // 2.密码强度：与注册、找回密码保持一致
         ThrowUtils.throwIf(password.length() < 8 || password.length() > 12,
@@ -431,7 +439,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         ThrowUtils.throwIf(!password.equals(checkPassword),
                 ErrorCode.PARAMS_ERROR, "两次密码不相等");
 
-        // 3.BCrypt 加密后写入（哈希串内含盐，禁止明文落库）
+        // 3.邮箱验证码校验（场景 changePwd）：必须凭当前绑定邮箱收到的验证码才能改密。
+        //   邮箱由服务端从登录态取，不接受前端传参 —— 否则验证码消费可被指向任意邮箱。
+        emailCodeService.consumeCode(current.getEmail(), EmailScene.CHANGE_PASSWORD, editPasswordDTO.getCode());
+
+        // 4.BCrypt 加密后写入（哈希串内含盐，禁止明文落库）
         String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
         boolean result = lambdaUpdate()
                 .eq(User::getId, targetId)
@@ -439,7 +451,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                 .update();
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "修改密码未成功");
 
-        // 4.密码已变更 → 销毁该账号全部历史会话，旧登录态立即失效。
+        // 5.密码已变更 → 销毁该账号全部历史会话，旧登录态立即失效。
         //   注意：登出后当前请求的 Cookie 即失效，前端需引导用户重新登录。
         StpUtil.logout(targetId);
     }
