@@ -57,7 +57,9 @@ public class RecInterestListener {
 
     /** 点赞：action=4，强信号 */
     @Async("eventTaskExecutor")
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    // 点赞发布点（LikeServiceImpl）无事务 → 必须 fallbackExecution = true，
+    // 否则本监听器被静默跳过，点赞行为与短期兴趣全丢（与 LikeEventListener 同一坑）
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onLike(LikeEvent e) {
         Post post = postService.getById(e.getPostId());
         if (post == null) {

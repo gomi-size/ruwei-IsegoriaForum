@@ -9,12 +9,19 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * 监听 LikeEvent（@Async，不走 AFTER_COMMIT——点赞 Service 无 DB 事务）：
- * 生成 type=1 点赞通知落库 + WS 实时推送（幂等由 bizKey 保证）。
+ * 监听 LikeEvent：生成 type=1 点赞通知落库 + WS 实时推送（幂等由 bizKey 保证）。
  * 文案「xxx 赞了你的帖子」；bizKey = like:post:{actorId}:{postId}（同动作重复点赞不重复通知）。
+ *
+ * <p><b>必须带 {@code fallbackExecution = true}</b>：{@code LikeServiceImpl#togglePostLike} 全链路
+ * 没有 DB 事务（Redis Lua 翻转 + 发 MQ，本就不该套事务），而 {@code @TransactionalEventListener}
+ * 的 {@code fallbackExecution} <b>默认 false</b> —— 事件发布时若没有活跃事务，监听器会被
+ * <b>静默跳过</b>（仅 debug 级 "No transaction is active - skipping"，无异常无 error 日志），
+ * 表现为「点赞后对方永远收不到通知」。
+ * 写法与 {@code es/listener/PostIndexEventListener}、{@code UserProfileEventListener} 保持一致。</p>
  */
 @Slf4j
 @Component
@@ -26,7 +33,8 @@ public class LikeEventListener {
     private NotificationService notificationService;
 
     @Async("eventTaskExecutor")
-    @TransactionalEventListener        // 此处无事务，等价于普通 @EventListener + 异步执行
+    // 点赞链路无事务 → 必须 fallbackExecution = true，否则监听器被静默跳过（详见类注释）
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onLike(LikeEvent event) {
         Long actorId = event.getActorId();
         Long postId = event.getPostId();
