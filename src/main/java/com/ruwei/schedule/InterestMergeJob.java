@@ -5,6 +5,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.DateUnit;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.unit.DataUnit;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ruwei.domain.empty.UserInterest;
 import com.ruwei.domain.empty.userBehavior;
 import com.ruwei.manager.RecCacheManager;
@@ -44,6 +45,10 @@ public class InterestMergeJob {
     @Resource
     private RecCacheManager recCacheManager;
 
+    /** 画像遗忘阈值（天）：超过该天数未被任何行为强化的维度整行删除 */
+    private static final int STALE_DAYS = 15;
+    /** 全局清理单批条数（分批防单次大事务） */
+    private static final int CLEAN_BATCH_SIZE = 5000;
 
     /**
      * 每日 03:30 执行（EsReconcileTask 为 03:00，错峰半小时）。
@@ -73,19 +78,31 @@ public class InterestMergeJob {
                 .toList();
         if(userIds.isEmpty()){
             log.info("长期兴趣合并：最近 {} 天无行为用户，跳过", LOOKBACK_DAYS);
-            return;
-        }
-        int merged = 0;
-        for (Long uid : userIds) {
-            try {
-                merged += mergeOne(uid);
-            } catch (Exception e) {
-                // 单用户失败不影响其余（幂等：短期键未删，明日重跑自然重试）
-                log.warn("兴趣合并失败 uid={}: {}", uid, e.getMessage());
+        }else{
+            int merged = 0;
+            for (Long uid : userIds) {
+                try {
+                    merged += mergeOne(uid);
+                } catch (Exception e) {
+                    // 单用户失败不影响其余（幂等：短期键未删，明日重跑自然重试）
+                    log.warn("兴趣合并失败 uid={}: {}", uid, e.getMessage());
+                }
             }
-        }
-        log.info("长期兴趣合并完成：{} 个用户，{} 条画像", userIds.size(), merged);
+            log.info("长期兴趣合并完成：{} 个用户，{} 条画像", userIds.size(), merged);
 
+        }
+        // 全局兜底清理：死户（近期无行为、不在上面 mergeOne 范围内）的超期画像同样要遗忘。
+        // 条件走 idxLastActiveAt 索引；分批 LIMIT 防单次大事务（Job 单线程串行，无并发冲突）。
+        int cleanedTotal = 0;
+        int batch;
+        do {
+            batch = userInterestService.getBaseMapper().delete(
+                    new LambdaQueryWrapper<UserInterest>()
+                            .lt(UserInterest::getLastActiveAt, DateUtil.offsetDay(new Date(), -STALE_DAYS))
+                            .last("LIMIT " + CLEAN_BATCH_SIZE));
+            cleanedTotal += batch;
+        } while (batch >= CLEAN_BATCH_SIZE);
+        log.info("长期兴趣合并：全局清理超期画像 {} 条", cleanedTotal);
     }
     /**
      * 单用户合并：短期兴趣 → 长期画像（upsert）→ 删短期键。
