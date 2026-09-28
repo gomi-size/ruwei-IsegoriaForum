@@ -258,6 +258,46 @@ mvn spring-boot:run
 
 服务端口 `8188`，统一前缀 `/api`；CORS 白名单在 `application.yml` 的 `cors.allowed-origins` 中配置（生产环境务必替换为真实域名，严禁 `*`）。
 
+## 部署（服务器）
+
+服务器目录：`/home/data/back/back/IsegoriaForum`，服务名 `app-monolith`。
+
+### 一键部署
+
+```bash
+cd /home/data/back/back/IsegoriaForum
+git pull
+bash deploy.sh          # 拉代码 → 构建 → 重建容器；脚本会自动打点各阶段耗时
+bash deploy.sh -l       # 同上，结束后自动跟随日志
+bash deploy.sh -n       # 跳过构建，只重建容器（改了 compose / 环境变量时用）
+```
+
+`deploy.sh` 等价于原来手敲的四条命令，额外做了两件事：**各阶段耗时打点**、**构建日志体检**——如果日志里仍出现 `repo.maven.apache.org` 或大量 `Downloading from`，会直接警告并指出该查哪一处。
+
+### 构建慢的根因与已落地优化
+
+| 问题 | 现象 | 修复 |
+|---|---|---|
+| 容器内无 Maven 国内镜像 | 直连 `repo.maven.apache.org`，实测 12 KB/s~36 B/s，`spring-web`（1.8MB）单个包要 2.5 分钟 | `docker/settings.xml` 走阿里云公共仓库，Dockerfile 中 `COPY docker/settings.xml /root/.m2/settings.xml` |
+| cache 挂载点遮蔽配置 | 挂 `target=/root/.m2` 会把 COPY 进去的 `settings.xml` 整个盖掉，镜像静默失效 | 挂载点改为 `/root/.m2/repository` |
+| `dependency:go-offline` 是伪缓存 | 它只下 pom 显式声明的一部分，插件依赖与部分传递依赖会漏（[MDEP-82](https://issues.apache.org/jira/browse/MDEP-82)），且失败不中断 → 该层显示 `CACHED` 但 `package` 阶段仍在下包 | 补 `dependency:resolve-plugins`，并显式指定依赖插件版本 3.6.1（默认 2.8 有已知缺陷） |
+| `clean` 与测试编译 | 容器层内 `target/` 本就是空的，`clean` 纯属多解析一个插件；`-DskipTests` 仍会编译测试代码 | 去掉 `clean`，改用 `-Dmaven.test.skip=true` |
+
+预期耗时：**首次（缓存重建）1~2 分钟，此后只改 Java 代码 20~40 秒**。
+
+> **不要执行 `docker builder prune`，也不要用 `--no-cache`** —— Maven 依赖缓存在 BuildKit 的 cache mount 里，清掉就得重新下载。
+
+### 注意：以下文件不在 git 仓库内
+
+`Dockerfile` 与 `docker-compose-service.yml` 是**服务器本地文件**，`git pull` 带不过来，改动需手工同步：
+
+```bash
+# 在服务器上，用纳入版本管理的标准版覆盖本地 Dockerfile
+cp docker/Dockerfile ./Dockerfile
+```
+
+`docker/Dockerfile` 是仓库维护的标准版（含上述全部优化 + 运行阶段），并已包含 `java -jar` 所需的 `--add-opens` 参数（`pom.xml` 里的 `<jvmArguments>` 只对 `mvn spring-boot:run` 生效）。
+
 ## 相关文档
 
 - [ES搜索接入方案与实施计划.md](ES搜索接入方案与实施计划.md) —— 搜索模块的完整设计与实施
