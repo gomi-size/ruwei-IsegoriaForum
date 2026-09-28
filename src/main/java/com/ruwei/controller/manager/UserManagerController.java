@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/admin/user")
+@SaCheckRole("admin")
 public class UserManagerController {
 
     @Resource
@@ -41,16 +42,25 @@ public class UserManagerController {
     private EmailCodeService emailCodeService;
 
     /**
-     * 用户注册
-     * @param userRegisterDTO
-     * @return
+     * 管理员注册用户（后台代建账号）。
+     *
+     * <p>入参 {@code UserRegisterDTO}：管理端只取 {@code username} / {@code password}
+     * （{@code checkPassword} 传了就校验一致），<b>不校验邮箱验证码</b>
+     * —— 管理员身份即凭证，{@code email} / {@code code} 可为空。</p>
+     *
+     * <p><b>不建立登录态</b>：本接口是管理员代建账号，若照搬 C 端
+     * {@code POST /user/register} 的 {@code StpUtil.login(...)}，
+     * 会把<b>管理员自己的会话</b>切换成刚建的新账号（Sa-Token 的 login 会覆写当前 token），
+     * 出现「建完号管理员就掉线成新用户」。故此处只落库、不改登录态。</p>
+     *
+     * @param userRegisterDTO 用户名与密码
+     * @return 固定成功文案
      */
     @PostMapping("/register")
     @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
-    public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
+    public BaseResponse<String> adminRegisterUser(@RequestBody UserRegisterDTO userRegisterDTO){
 
-        User user= userService.userRegister(userRegisterDTO);
-        StpUtil.login(user.getId());
+        userService.adminRegisterUser(userRegisterDTO);
 
         return ResultUtils.success("注册成功");
     }

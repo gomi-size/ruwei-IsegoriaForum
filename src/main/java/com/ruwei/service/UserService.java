@@ -133,4 +133,10 @@ public interface UserService extends IService<User> {
     UserVO getOtherUserVOInfoById(Long id);
 
 
+    /**
+     * 管理员创建用户
+     * @param userRegisterDTO
+     * @return
+     */
+    User adminRegisterUser(UserRegisterDTO userRegisterDTO);
 }
