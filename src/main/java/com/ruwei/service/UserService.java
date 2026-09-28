@@ -1,5 +1,6 @@
 package com.ruwei.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.ruwei.domain.dto.*;
 import com.ruwei.domain.empty.User;
@@ -139,4 +140,10 @@ public interface UserService extends IService<User> {
      * @return
      */
     User adminRegisterUser(UserRegisterDTO userRegisterDTO);
+
+    /**
+     * 用来查询用户
+     * @param userQueryDTO
+     */
+    IPage<UserVO> listAllUseVO(UserQueryDTO userQueryDTO);
 }

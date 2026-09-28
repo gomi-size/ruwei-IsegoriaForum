@@ -6,6 +6,8 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
@@ -17,6 +19,7 @@ import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
+import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.es.event.UserProfileUpdatedEvent;
 import com.ruwei.mapper.UserFollowMapper;
@@ -35,6 +38,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
 * @author Administrator
@@ -66,10 +70,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
-
-    @Resource
-    @Lazy
-    private PostService postService;
 
     /**
      * userId 计数器在 Redis 中的 key。
@@ -713,6 +713,24 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
         // 必须返回实体：调用方依赖其 id（原实现 return null 导致上层 NPE）
         return user;
+    }
+
+    /**
+     * 用来查询用户
+     * @param userQueryDTO
+     */
+    @Override
+    public IPage<UserVO> listAllUseVO(UserQueryDTO userQueryDTO) {
+        QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
+        IPage<User> userPage = page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
+
+
+        List<UserVO> userVOList = userPage.getRecords().stream().map(this::buildOtherUserVO).toList();
+
+        IPage<UserVO> voPage = new Page<>(userPage.getCurrent(), userPage.getSize(), userPage.getTotal());
+        voPage.setRecords(userVOList);
+        return voPage;
+
     }
 
     /**

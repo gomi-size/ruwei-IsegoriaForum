@@ -164,7 +164,13 @@ public class UserController {
 
         return ResultUtils.success(BeanUtil.copyProperties(userService.getById(id),UserVO.class));
     }
+    @PostMapping("/list")
+    public BaseResponse<IPage<UserVO>> listAllUseVO(@RequestBody  UserQueryDTO userQueryDTO) {
 
+        IPage<UserVO>  userVOIPage=  userService.listAllUseVO(userQueryDTO);
+
+        return ResultUtils.success(userVOIPage);
+    }
     /**
      * 当前登录用户获取别人的详情详情
      * <p>入参兼容<b>对外编码 userId 与内部主键 id</b>：他人主页可传对外编码；
