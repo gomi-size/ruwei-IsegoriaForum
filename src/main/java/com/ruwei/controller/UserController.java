@@ -164,6 +164,13 @@ public class UserController {
 
         return ResultUtils.success(BeanUtil.copyProperties(userService.getById(id),UserVO.class));
     }
+
+    /**
+     * 搜索用户
+     * @param userQueryDTO
+     * @return
+     */
+    @SaCheckLogin
     @PostMapping("/list")
     public BaseResponse<IPage<UserVO>> listAllUseVO(@RequestBody  UserQueryDTO userQueryDTO) {
 
