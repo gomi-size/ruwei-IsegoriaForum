@@ -211,23 +211,38 @@ public class UserManagerController {
 
     /**
      * 管理员查看所有用户列表
-     * @return
+     *
+     * <p><b>敏感字段</b>：{@code password} 与 {@code isDelete} 由 {@code User} 实体上的
+     * {@code @JsonIgnore} 统一屏蔽（历史实现是此处 {@code setPassword("*****")} 假脱敏，
+     * 而 {@code /getUserInfo} 漏了 → 泄漏真实哈希），故本方法不再自行处理。</p>
+     *
+     * <p>{@code phone} / {@code email} 目前仍是明文返回，PII 分级（列表脱敏 + 详情明文）
+     * 与 VO 化见 {@code docs/modules/17-admin-user-management.md}。</p>
+     *
+     * @param userQueryDTO 分页 + id / userId / username / nickname 条件
+     * @return 用户分页（雪花 id 由全局 ToStringSerializer 输出为字符串）
      */
     @SaCheckRole("admin")
     @PostMapping("/list")
     public BaseResponse<IPage<User>> listAllUsers(@RequestBody  UserQueryDTO userQueryDTO) {
         QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
         IPage<User> userPage = userService.page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
-        userPage.convert(user -> {
-            user.setPassword("*****");
-            return user;
-        });
         return ResultUtils.success(userPage);
     }
 
     /**
      * 管理员：查看任意指定用户的完整信息
-     * 仅管理员可访问 —— @SaCheckRole("admin")（普通用户看自己请用 /user/userInfo）
+     *
+     * <p>仅管理员可访问 —— {@code @SaCheckRole("admin")}（普通用户看自己请用 {@code /user/userInfo}）。</p>
+     *
+     * <p><b>修复说明</b>：本接口原先直出 {@code User} 实体且未做任何处理，
+     * 会把 <b>BCrypt 密码哈希</b>一并写进响应体（列表接口当时至少有假脱敏）。
+     * 现由实体上的 {@code @JsonIgnore} 统一屏蔽 {@code password} / {@code isDelete}；
+     * 但仍会返回明文 {@code phone} / {@code email}，属管理员职责范围内的数据，
+     * PII 分级与 VO 化见 {@code docs/modules/17-admin-user-management.md}。</p>
+     *
+     * @param id 用户内部主键（雪花 id）
+     * @return 用户实体（不含 password / isDelete）
      */
     @SaCheckRole("admin")
     @GetMapping("/getUserInfo")
