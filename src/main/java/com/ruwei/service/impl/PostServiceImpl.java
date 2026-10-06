@@ -170,6 +170,24 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
     private EsPostSyncService esPostSyncService;
 
     /**
+     * 归一化前端传入的板块 id。
+     *
+     * <p><b>为什么需要它</b>：前端的板块选择器有「已选 / 未选 / 已清除」三态，而 JSON 里
+     * <b>「字段缺失」与「字段为 null」在反序列化后都是 null</b>，后端无法区分「本次请求未涉及板块」
+     * 与「把板块置空」。因此前端约定：<b>未选 / 已清除时显式传 {@code 0}</b>，
+     * 只有「本次请求不打算改动板块」才省略该字段。本方法把 {@code <= 0} 的值一律归一为 {@code null}。</p>
+     *
+     * <p>归一化的两个作用：① 不会拿 0 去查库（否则会命中"板块不存在"校验而误报错）；
+     * ② 不会把 0 当作真实板块 id 写进 {@code post.board_id}。</p>
+     *
+     * @param boardId 前端原始传入的板块 id，可为 null
+     * @return 真实板块内部 id；表示"无板块"时返回 null
+     */
+    private static Long normalizeBoardId(Long boardId) {
+        return (boardId == null || boardId <= 0L) ? null : boardId;
+    }
+
+    /**
      * 创建帖子（送审）。返回对外展示的 {@link PostVO}（枚举字段回显文字、雪花 id 转字符串）。
      */
     @Override
@@ -196,9 +214,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
             ThrowUtils.throwIf(dto.getContent().length() > 10000000, ErrorCode.PARAMS_ERROR, "内容最多10000000字");
         }
 
-        // 2. 板块存在性校验（boardId 非空时）
-        if (dto.getBoardId() != null) {
-            Board board = boardService.getById(dto.getBoardId());
+        // 2. 板块存在性校验（boardId 非空时；0 / 负数 = 未选板块，归一为 null）
+        Long boardId = normalizeBoardId(dto.getBoardId());
+        if (boardId != null) {
+            Board board = boardService.getById(boardId);
             ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
         }
 
@@ -214,7 +233,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         Post post = new Post();
         post.setPostCode(generatePostCode());
         post.setUserId(loginId);
-        post.setBoardId(dto.getBoardId());
+        post.setBoardId(boardId);
         post.setTitle(title);
         post.setContent(content);
         post.setCover(dto.getCover());
@@ -264,9 +283,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
      * 内容照常过敏感词（拦截即拒、替换词脱敏存储），板块存在性照常校验。</p>
      */
     private PostVO saveAsNewDraft(PostDTO dto, long loginId) {
-        // 板块存在性校验（选了板块时）
-        if (dto.getBoardId() != null) {
-            Board board = boardService.getById(dto.getBoardId());
+        // 板块存在性校验（选了板块时；0 / 负数 = 未选，归一为 null）
+        Long boardId = normalizeBoardId(dto.getBoardId());
+        if (boardId != null) {
+            Board board = boardService.getById(boardId);
             ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
         }
 
@@ -302,7 +322,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }
 
         // 覆盖本次传入的内容字段（空标题落空串，草稿允许未写完）
-        draft.setBoardId(dto.getBoardId());
+        // 板块：显式传入即覆盖（0 = 清除，已在此前归一为 null），使草稿与发布页表单状态一致
+        draft.setBoardId(boardId);
         draft.setTitle(title == null ? "" : title);
         draft.setContent(content);
         if (dto.getCover() != null) {
@@ -372,7 +393,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         }
 
         // 覆盖本次传入的内容字段
-        draft.setBoardId(dto.getBoardId());
+        // 板块：显式传入即覆盖（0 = 清除，归一为 null）；存在性校验已由调用方 updatePost 完成
+        draft.setBoardId(normalizeBoardId(dto.getBoardId()));
         // 标题：本次传入（已过敏感词）非空则覆盖，否则沿用已有草稿/原帖
         draft.setTitle(StrUtil.isNotBlank(title)
                 ? title
@@ -440,6 +462,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
         ThrowUtils.throwIf(BeanUtil.isEmpty(post), ErrorCode.NOT_FOUND_ERROR, "帖子不存在");
         ThrowUtils.throwIf(!Objects.equals(post.getUserId(), loginId), ErrorCode.NO_AUTH_ERROR, "只能编辑自己的帖子");
 
+        // 板块：rawBoardId 为 null 说明本次请求"省略"了该字段（不打算改动板块），保持原值不动；
+        // 非 null 才是显式意图——0 / 负数 = 清除板块（归一为 null），正数需校验板块存在。
+        Long rawBoardId = dto.getBoardId();
+        Long targetBoardId = normalizeBoardId(rawBoardId);
+        if (targetBoardId != null) {
+            Board board = boardService.getById(targetBoardId);
+            ThrowUtils.throwIf(BeanUtil.isEmpty(board), ErrorCode.NOT_FOUND_ERROR, "板块不存在");
+        }
+
         // 敏感词过滤（编辑的内容同样拦截/脱敏）；blocks 优先，纯文本兜底（无内容变更返回 null）
         String title = StrUtil.isBlank(dto.getTitle()) ? null : scrub(dto.getTitle(), "标题");
         String content = resolveContent(dto);
@@ -472,6 +503,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post>
           .set(title != null, Post::getTitle, title)
           .set(content != null, Post::getContent, content)
           .set(dto.getCover() != null, Post::getCover, dto.getCover())
+          // 板块：仅当本次显式传入时覆盖（rawBoardId 非 null；0 已归一为 null，表示清除板块）。
+          // ⚠️ 此处曾遗漏 boardId，导致「编辑帖子 / 发布编辑草稿」时板块绑定被静默丢弃
+          .set(rawBoardId != null, Post::getBoardId, targetBoardId)
           .set(topic != null, Post::getTopic, topic)
           .set(visibilityCode != null, Post::getVisibility, visibilityCode)
           .set(Post::getStatus, PostStatusEnum.REVIEWING.getCode())

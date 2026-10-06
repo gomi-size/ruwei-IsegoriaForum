@@ -6,6 +6,8 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.ruwei.common.ErrorCode;
 import com.ruwei.common.ThrowUtils;
@@ -17,6 +19,7 @@ import com.ruwei.component.SensitiveWordFilter;
 import com.ruwei.domain.empty.Post;
 import com.ruwei.domain.empty.User;
 import com.ruwei.domain.empty.UserFollow;
+import com.ruwei.domain.utils.QueryWrapperUtils;
 import com.ruwei.domain.vo.UserVO;
 import com.ruwei.es.event.UserProfileUpdatedEvent;
 import com.ruwei.mapper.UserFollowMapper;
@@ -35,6 +38,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
 * @author Administrator
@@ -66,10 +70,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private ApplicationEventPublisher eventPublisher;
-
-    @Resource
-    @Lazy
-    private PostService postService;
 
     /**
      * userId 计数器在 Redis 中的 key。
@@ -638,6 +638,99 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User otherUser = getById(id);
         ThrowUtils.throwIf(BeanUtil.isEmpty(otherUser), ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         return buildOtherUserVO(otherUser);
+    }
+
+    /**
+     * 管理员创建用户（后台代建账号）。
+     *
+     * <p>与 C 端 {@link #userRegister(UserRegisterDTO)} 的差异：</p>
+     * <ul>
+     *   <li><b>不校验邮箱验证码</b>：管理员身份本身即凭证，DTO 中的 {@code code} 不参与校验；
+     *       {@code email} 也不做格式与唯一性校验，仅当传入时才随 {@code copyProperties} 落库，
+     *       未传则为 null（用户可登录后在「设置 → 邮箱」自行绑定）。</li>
+     *   <li>{@code checkPassword} 仅在传入非空时才校验一致性，兼容脚本化调用。</li>
+     * </ul>
+     *
+     * <p><b>注意</b>：本方法<b>必须返回已落库的实体</b>（id 由 MyBatis-Plus ASSIGN_ID 回填），
+     * 上层 {@code UserManagerController} 会用到；返回 null 会导致上层 NPE / 接口 500。</p>
+     *
+     * @param userRegisterDTO 用户名、密码（其余字段忽略）
+     * @return 新建并已落库的用户实体（含自增 id 与对外 userId）
+     */
+    @Override
+    public User adminRegisterUser(UserRegisterDTO userRegisterDTO) {
+        Boolean admin = isAdmin();
+        ThrowUtils.throwIf(!admin,ErrorCode.NO_AUTH_ERROR);
+
+        // 1.判空必须早于下面的 length()/matches()，否则字段缺失时直接 NPE（C 端 userRegister 已有该判空）
+        String username = userRegisterDTO.getUsername();
+        ThrowUtils.throwIf(StrUtil.isBlank(username), ErrorCode.PARAMS_ERROR, "用户名不能为空");
+        String password = userRegisterDTO.getPassword();
+        ThrowUtils.throwIf(StrUtil.isBlank(password), ErrorCode.PARAMS_ERROR, "密码不能为空");
+
+        // 用户名：6~12位，不能全为数字
+        ThrowUtils.throwIf(username.length() < 6 || username.length() > 12,
+                ErrorCode.PARAMS_ERROR, "用户名长度必须为6~12位");
+        ThrowUtils.throwIf(username.matches("^\\d+$"),
+                ErrorCode.PARAMS_ERROR, "用户名不能全为数字");
+
+        // 密码：8~12位，不能全为数字
+        ThrowUtils.throwIf(password.length() < 8 || password.length() > 12,
+                ErrorCode.PARAMS_ERROR, "密码长度必须为8~12位");
+        ThrowUtils.throwIf(password.matches("^\\d+$"),
+                ErrorCode.PARAMS_ERROR, "密码不能全为数字");
+
+        // 确认密码：传了才校验（管理端表单必传；不传不阻断，兼容脚本调用）
+        String checkPassword = userRegisterDTO.getCheckPassword();
+        if (StrUtil.isNotBlank(checkPassword)) {
+            ThrowUtils.throwIf(!checkPassword.equals(password), ErrorCode.PARAMS_ERROR, "两次密码不一致");
+        }
+
+        boolean exists = lambdaQuery().eq(User::getUsername, username).exists();
+        ThrowUtils.throwIf(exists,ErrorCode.OPERATION_ERROR,"用户名已被注册了");
+
+        //2.加密密码
+        String encryptedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
+        User user = BeanUtil.copyProperties(userRegisterDTO, User.class);
+        user.setPassword(encryptedPassword);
+
+        // 3.管理员代建账号一律为普通用户且状态正常（显式赋值，不依赖库表缺省，避免环境差异）
+        user.setAdmin(AdminEnum.User.getCode());
+        user.setStatus(StatusEnum.NORMAL.getCode());
+
+        //4.设置 userId：基于 Redis 原子自增，每次注册 +1（首次以库内最大 userId 起步，避免与历史数据冲突）
+        user.setUserId(generateUserId());
+
+        //5.设置nikeName
+        String pathName="ISEGORIA";
+        String randomStr = RandomUtil.randomString(6);
+        String nikeName=pathName+"_"+randomStr;
+        user.setNickname(nikeName);
+
+        //6.保存到数据库
+        boolean result = save(user);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR,"注册失败");
+
+        // 必须返回实体：调用方依赖其 id（原实现 return null 导致上层 NPE）
+        return user;
+    }
+
+    /**
+     * 用来查询用户
+     * @param userQueryDTO
+     */
+    @Override
+    public IPage<UserVO> listAllUseVO(UserQueryDTO userQueryDTO) {
+        QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
+        IPage<User> userPage = page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
+
+
+        List<UserVO> userVOList = userPage.getRecords().stream().map(this::buildOtherUserVO).toList();
+
+        IPage<UserVO> voPage = new Page<>(userPage.getCurrent(), userPage.getSize(), userPage.getTotal());
+        voPage.setRecords(userVOList);
+        return voPage;
+
     }
 
     /**

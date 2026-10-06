@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 @RequestMapping("/admin/user")
+@SaCheckRole("admin")
 public class UserManagerController {
 
     @Resource
@@ -41,16 +42,25 @@ public class UserManagerController {
     private EmailCodeService emailCodeService;
 
     /**
-     * 用户注册
-     * @param userRegisterDTO
-     * @return
+     * 管理员注册用户（后台代建账号）。
+     *
+     * <p>入参 {@code UserRegisterDTO}：管理端只取 {@code username} / {@code password}
+     * （{@code checkPassword} 传了就校验一致），<b>不校验邮箱验证码</b>
+     * —— 管理员身份即凭证，{@code email} / {@code code} 可为空。</p>
+     *
+     * <p><b>不建立登录态</b>：本接口是管理员代建账号，若照搬 C 端
+     * {@code POST /user/register} 的 {@code StpUtil.login(...)}，
+     * 会把<b>管理员自己的会话</b>切换成刚建的新账号（Sa-Token 的 login 会覆写当前 token），
+     * 出现「建完号管理员就掉线成新用户」。故此处只落库、不改登录态。</p>
+     *
+     * @param userRegisterDTO 用户名与密码
+     * @return 固定成功文案
      */
     @PostMapping("/register")
     @RateLimit(dimension = RateLimitDimension.IP, limit = 10, window = 600, prefix = "register")
-    public BaseResponse<String> userRegister(@RequestBody UserRegisterDTO userRegisterDTO){
+    public BaseResponse<String> adminRegisterUser(@RequestBody UserRegisterDTO userRegisterDTO){
 
-        User user= userService.userRegister(userRegisterDTO);
-        StpUtil.login(user.getId());
+        userService.adminRegisterUser(userRegisterDTO);
 
         return ResultUtils.success("注册成功");
     }
@@ -201,23 +211,38 @@ public class UserManagerController {
 
     /**
      * 管理员查看所有用户列表
-     * @return
+     *
+     * <p><b>敏感字段</b>：{@code password} 与 {@code isDelete} 由 {@code User} 实体上的
+     * {@code @JsonIgnore} 统一屏蔽（历史实现是此处 {@code setPassword("*****")} 假脱敏，
+     * 而 {@code /getUserInfo} 漏了 → 泄漏真实哈希），故本方法不再自行处理。</p>
+     *
+     * <p>{@code phone} / {@code email} 目前仍是明文返回，PII 分级（列表脱敏 + 详情明文）
+     * 与 VO 化见 {@code docs/modules/17-admin-user-management.md}。</p>
+     *
+     * @param userQueryDTO 分页 + id / userId / username / nickname 条件
+     * @return 用户分页（雪花 id 由全局 ToStringSerializer 输出为字符串）
      */
     @SaCheckRole("admin")
     @PostMapping("/list")
     public BaseResponse<IPage<User>> listAllUsers(@RequestBody  UserQueryDTO userQueryDTO) {
         QueryWrapper<User> userQueryWrapper = QueryWrapperUtils.getUserQueryWrapper(userQueryDTO);
         IPage<User> userPage = userService.page(new Page<>(userQueryDTO.getCurrent(), userQueryDTO.getPageSize()), userQueryWrapper);
-        userPage.convert(user -> {
-            user.setPassword("*****");
-            return user;
-        });
         return ResultUtils.success(userPage);
     }
 
     /**
      * 管理员：查看任意指定用户的完整信息
-     * 仅管理员可访问 —— @SaCheckRole("admin")（普通用户看自己请用 /user/userInfo）
+     *
+     * <p>仅管理员可访问 —— {@code @SaCheckRole("admin")}（普通用户看自己请用 {@code /user/userInfo}）。</p>
+     *
+     * <p><b>修复说明</b>：本接口原先直出 {@code User} 实体且未做任何处理，
+     * 会把 <b>BCrypt 密码哈希</b>一并写进响应体（列表接口当时至少有假脱敏）。
+     * 现由实体上的 {@code @JsonIgnore} 统一屏蔽 {@code password} / {@code isDelete}；
+     * 但仍会返回明文 {@code phone} / {@code email}，属管理员职责范围内的数据，
+     * PII 分级与 VO 化见 {@code docs/modules/17-admin-user-management.md}。</p>
+     *
+     * @param id 用户内部主键（雪花 id）
+     * @return 用户实体（不含 password / isDelete）
      */
     @SaCheckRole("admin")
     @GetMapping("/getUserInfo")
@@ -240,17 +265,6 @@ public class UserManagerController {
         return ResultUtils.success("更新成功");
     }
 
-
-    /*
-     * 原「修改密码」接口 POST /admin/user/editPassword (Long id, String password) 已移除。
-     *
-     * 移除原因：它与下方 POST /admin/user/forgetPassword（adminResetPassword）职责完全重叠，
-     * 且只带 @SaCheckLogin 而不校验 id 与登录态是否一致 ——
-     * 任意已登录用户都能借它重置<b>他人</b>密码，属越权入口。
-     *
-     * 管理员代改他人密码请统一走下方的 /forgetPassword（已标注 @SaCheckRole("admin")）；
-     * 用户改自己的密码走 C 端 POST /user/editPassword。
-     */
 
     /**
      * 管理员：重置指定用户的密码（后台运维场景）。

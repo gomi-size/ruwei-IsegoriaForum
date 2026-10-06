@@ -100,10 +100,17 @@ mybatis-plus:
         logic-delete-value: 1         # 已删除值
         logic-not-delete-value: 0     # 未删除值
 
-# 日志级别：其余 mapper 仍打印 SQL（debug）；仅压住敏感词加载这一条查询的 SQL 日志
+# ===== 日志级别 =====
+# MyBatis-Plus 的 SQL 日志（Preparing / Parameters / <== Total）统一在 DEBUG 级，
+# 由 mapper logger 控制是否输出。默认 warn → 控制台与 docker logs 里不再刷 SQL。
+#
+# 需要排查 SQL 时不用改代码、不用改这里，加一个环境变量即可临时打开：
+#   SQL_LOG_LEVEL=debug            （docker compose 里加 environment，或 shell 导出）
+#   -DSQL_LOG_LEVEL=debug          （IDE Run Configuration 的 VM options）
+# SensitiveWordMapper 被单独钉死在 warn：启动期批量加载敏感词那一条 SQL 即使全开也不打印。
 logging:
   level:
-    com.ruwei.mapper: debug
+    com.ruwei.mapper: ${SQL_LOG_LEVEL:warn}
     com.ruwei.mapper.SensitiveWordMapper: warn
     org.springdoc: DEBUG
     io.swagger: DEBUG

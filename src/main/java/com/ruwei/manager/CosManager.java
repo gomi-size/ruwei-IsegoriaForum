@@ -81,7 +81,7 @@ public class CosManager implements ObjectStorageManager {
             PicOperations picOperations = new PicOperations();
             picOperations.setIsPicInfo(1);
             PicOperations.Rule rule = new PicOperations.Rule();
-            rule.setFileId(webpKey);
+            rule.setFileId("/" + webpKey);
             rule.setRule(WEBP_FORMAT_RULE);
             rule.setBucket(cosClientConfig.getBucket());
             picOperations.setRules(List.of(rule));
@@ -115,7 +115,9 @@ public class CosManager implements ObjectStorageManager {
         String webpKey = toWebpKey(key);
         //设置参数
         PicOperations.Rule compressRule = new PicOperations.Rule();
-        compressRule.setFileId(webpKey);
+        // 同 uploadImage：fileid 必须带前导斜杠才是绝对路径，
+        // 否则会被拼接成「原图目录 + webpKey」，落盘路径凭空多一层目录。
+        compressRule.setFileId("/" + webpKey);
         compressRule.setRule(WEBP_FORMAT_RULE);
         compressRule.setBucket(cosClientConfig.getBucket());
         ruleList.add(compressRule);

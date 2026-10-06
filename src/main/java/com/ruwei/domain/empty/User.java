@@ -1,6 +1,7 @@
 package com.ruwei.domain.empty;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -39,7 +40,8 @@ public class User implements Serializable {
 
     /**
      * bcrypt加密
-     */
+     * */
+    @JsonIgnore
     private String password;
 
     /**
@@ -119,8 +121,12 @@ public class User implements Serializable {
 
     /**
      * 是否删除
+     *
+     * <p>{@code @TableLogic} 逻辑删除标记属持久层实现细节，不对接口暴露；
+     * 管理端需要「已注销」语义时看 {@code status == 3}（{@code StatusEnum.CANCELLED}）。</p>
      */
     @TableLogic
+    @JsonIgnore
     private Integer isDelete;
 
     /**
