@@ -290,6 +290,7 @@ public class LikeCacheManager {
     public Map<Long, Boolean> batchIsPostLiked(Collection<Long> postIds, Long userId) {
         if (postIds.isEmpty()) return Collections.emptyMap();
         postIds.forEach(this::ensurePostLoaded);   // 先确保全部键已加载（缺失回源）
+        //用来判断这个key中是否有这个人
         List<Object> hits = redis.executePipelined((RedisCallback<?>) (connection) -> {
             for (Long id : postIds) {
                 connection.sIsMember((POST_USERS + id).getBytes(), String.valueOf(userId).getBytes());
